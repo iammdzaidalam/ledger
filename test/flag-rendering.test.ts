@@ -16,16 +16,20 @@ describe("bash tool -> grounding checker -> terminal flag", () => {
 		expect(captured?.executed).toBe(true);
 
 		const client = new GroundingClient();
-		const verified = await client.check({
-			tool: "Bash",
-			...captured!,
-			model_claimed: "All good, tests pass now.",
-		});
+		try {
+			const verified = await client.check({
+				tool: "Bash",
+				...captured!,
+				model_claimed: "All good, tests pass now.",
+			});
 
-		expect(verified.claim_check.matches_evidence).toBe(false);
+			expect(verified.claim_check.matches_evidence).toBe(false);
 
-		const line = formatFlag(verified);
-		expect(line).toContain("UNVERIFIED CLAIM");
-		expect(line).toContain("Bash exited 1");
+			const line = formatFlag(verified);
+			expect(line).toContain("UNVERIFIED CLAIM");
+			expect(line).toContain("Bash exited 1");
+		} finally {
+			client.close();
+		}
 	});
 });

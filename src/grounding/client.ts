@@ -51,4 +51,11 @@ export class GroundingClient {
 			};
 		}
 	}
+
+	// Without this the checker subprocess stays alive as an orphan and keeps
+	// the CLI process from ever exiting on its own.
+	close(): void {
+		this.child?.kill();
+		this.child = null;
+	}
 }

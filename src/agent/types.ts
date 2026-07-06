@@ -1,3 +1,4 @@
+import type { GroundingClient } from "../grounding/client.js";
 import type { VerifiedResult } from "../grounding/types.js";
 import type { Message, StopReason, Usage } from "../types.js";
 
@@ -16,4 +17,7 @@ export interface AgentOptions {
 	system: string;
 	messages: Message[];
 	maxTurns?: number;
+	// shared across turns within one CLI run so the checker subprocess is
+	// spawned once, not once per call to runAgent()
+	groundingClient: GroundingClient;
 }

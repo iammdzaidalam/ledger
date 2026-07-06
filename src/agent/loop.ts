@@ -1,5 +1,4 @@
 import { extractClaimText } from "../grounding/claim-extractor.js";
-import { GroundingClient } from "../grounding/client.js";
 import { createProvider } from "../providers/index.js";
 import { getTool, getToolDefinitions } from "../tools/index.js";
 import type { RawExecution } from "../tools/types.js";
@@ -19,7 +18,7 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 
 	// bash results awaiting a claim to check against, since the claim always
 	// shows up in the model's *next* text turn, so this can't be checked inline.
-	const grounding = new GroundingClient();
+	const grounding = options.groundingClient;
 	const pendingBashResults = new Map<string, RawExecution>();
 
 	yield { type: "agent_start" };

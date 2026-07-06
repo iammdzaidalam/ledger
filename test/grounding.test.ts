@@ -1,11 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { GroundingClient } from "../src/grounding/client.js";
 
 // Exercises the real subprocess protocol end to end. Requires
 // `npm run checker:build` to have produced bin/grounding-checker first.
 describe("GroundingClient against the real checker binary", () => {
+	let client: GroundingClient;
+
+	afterEach(() => {
+		client?.close();
+	});
+
 	it("flags a success claim when the command actually failed", async () => {
-		const client = new GroundingClient();
+		client = new GroundingClient();
 		const result = await client.check({
 			tool: "Bash",
 			args: { command: "npm test" },
@@ -20,7 +26,7 @@ describe("GroundingClient against the real checker binary", () => {
 	});
 
 	it("hard-fails when the tool never actually ran", async () => {
-		const client = new GroundingClient();
+		client = new GroundingClient();
 		const result = await client.check({
 			tool: "Bash",
 			args: { command: "some-command" },
@@ -35,7 +41,7 @@ describe("GroundingClient against the real checker binary", () => {
 	});
 
 	it("passes through a claim that matches the evidence", async () => {
-		const client = new GroundingClient();
+		client = new GroundingClient();
 		const result = await client.check({
 			tool: "Bash",
 			args: { command: "go test ./..." },
