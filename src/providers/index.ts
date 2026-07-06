@@ -1,4 +1,6 @@
 import { createClaudeProvider } from "./claude.js";
+import { createGeminiProvider } from "./gemini.js";
+import { createGroqProvider } from "./groq.js";
 import type { ModelInfo, Provider } from "./types.js";
 
 export const MODELS: ModelInfo[] = [
@@ -16,10 +18,40 @@ export const MODELS: ModelInfo[] = [
 		contextWindow: 200_000,
 		maxOutputTokens: 8192,
 	},
+	{
+		id: "gemini-2.5-pro",
+		name: "Gemini 2.5 Pro",
+		provider: "gemini",
+		contextWindow: 1_000_000,
+		maxOutputTokens: 8192,
+	},
+	{
+		id: "gemini-2.5-flash",
+		name: "Gemini 2.5 Flash",
+		provider: "gemini",
+		contextWindow: 1_000_000,
+		maxOutputTokens: 8192,
+	},
+	{
+		id: "llama-3.3-70b-versatile",
+		name: "Llama 3.3 70B",
+		provider: "groq",
+		contextWindow: 128_000,
+		maxOutputTokens: 8192,
+	},
+	{
+		id: "llama-3.1-8b-instant",
+		name: "Llama 3.1 8B Instant",
+		provider: "groq",
+		contextWindow: 128_000,
+		maxOutputTokens: 8192,
+	},
 ];
 
 export function createProvider(providerName: string, apiKey: string): Provider {
 	if (providerName === "claude") return createClaudeProvider(apiKey);
+	if (providerName === "gemini") return createGeminiProvider(apiKey);
+	if (providerName === "groq") return createGroqProvider(apiKey);
 	throw new Error(`Unknown provider: ${providerName}`);
 }
 
