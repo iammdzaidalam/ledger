@@ -1,0 +1,35 @@
+import { consola } from "consola";
+import { runAgent } from "../agent/loop.js";
+import { appendMessage } from "../session/store.js";
+import type { Message } from "../types.js";
+
+export interface PrintOptions {
+	providerName: string;
+	model: string;
+	system: string;
+	message: string;
+	maxTurns?: number;
+	sessionPath?: string;
+}
+
+export async function runPrint(options: PrintOptions): Promise<void> {
+	const userMessage: Message = { role: "user", content: options.message };
+	if (options.sessionPath) await appendMessage(options.sessionPath, userMessage);
+
+	for await (const event of runAgent({
+		providerName: options.providerName,
+		model: options.model,
+		system: options.system,
+		messages: [userMessage],
+		maxTurns: options.maxTurns,
+	})) {
+		if (event.type === "text_delta") process.stdout.write(event.delta);
+		if (event.type === "tool_start") consola.info(`\n[${event.name}] ${JSON.stringify(event.input)}`);
+		if (event.type === "tool_end" && event.isError) consola.warn(`[${event.name}] failed: ${event.result}`);
+		if (event.type === "agent_end" && options.sessionPath) {
+			const last = event.messages.at(-1);
+			if (last) await appendMessage(options.sessionPath, last);
+		}
+	}
+	process.stdout.write("\n");
+}
