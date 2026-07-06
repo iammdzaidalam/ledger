@@ -1,4 +1,4 @@
-// Groq provider - OpenAI-compatible chat completions with streaming.
+// Groq provider, OpenAI-compatible chat completions with streaming.
 
 import { consola } from "consola";
 import Groq from "groq-sdk";
@@ -113,7 +113,7 @@ export function createGroqProvider(apiKey: string): Provider {
 			} catch (err) {
 				// Some Llama models on Groq serialize tool calls as raw <function=...>
 				// text instead of proper tool_calls, which comes back as an HTTP 400
-				// whose failed_generation field holds that markup - parse it out by hand.
+				// whose failed_generation field holds that markup, so parse it out by hand.
 				const groqErr = err as { status?: number; error?: { failed_generation?: string } };
 				const failedGen = groqErr.error?.failed_generation;
 				if (groqErr.status === 400 && failedGen) {

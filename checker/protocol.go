@@ -16,7 +16,7 @@ type CheckRequest struct {
 
 type ClaimCheck struct {
 	ModelClaimed *string `json:"model_claimed"`
-	// bool or "unverifiable" - Go has no union type, this is the pragmatic bridge
+	// bool or "unverifiable", since Go has no union type, this is the pragmatic bridge
 	MatchesEvidence interface{} `json:"matches_evidence"`
 }
 

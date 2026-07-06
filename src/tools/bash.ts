@@ -64,7 +64,7 @@ export const bashTool: Tool = {
 					resolve(errorResult(`Command timed out after ${timeoutMs}ms`));
 				}, timeoutMs);
 
-				// spawn itself failed - the command never actually ran
+				// spawn itself failed, meaning the command never actually ran
 				child.on("error", (err) => {
 					clearTimeout(timer);
 					meta?.onExecution?.({

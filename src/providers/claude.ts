@@ -1,4 +1,4 @@
-// Claude provider - wraps @anthropic-ai/sdk.
+// Claude provider, wraps @anthropic-ai/sdk.
 // Content blocks already match our internal shape, so barely any translation happens here.
 
 import Anthropic from "@anthropic-ai/sdk";

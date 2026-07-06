@@ -16,7 +16,7 @@ export async function runInteractive(options: InteractiveOptions): Promise<void>
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
 	const history: Message[] = [];
 
-	console.log(`ledger - ${options.providerName}/${options.model}. Ctrl+C to quit.\n`);
+	console.log(`ledger (${options.providerName}/${options.model}). Ctrl+C to quit.\n`);
 
 	let nextInput = options.initialMessage;
 	while (true) {

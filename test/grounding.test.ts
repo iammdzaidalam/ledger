@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GroundingClient } from "../src/grounding/client.js";
 
-// Exercises the real subprocess protocol end to end - requires
+// Exercises the real subprocess protocol end to end. Requires
 // `npm run checker:build` to have produced bin/grounding-checker first.
 describe("GroundingClient against the real checker binary", () => {
 	it("flags a success claim when the command actually failed", async () => {

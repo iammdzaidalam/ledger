@@ -17,8 +17,8 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 	let turns = 0;
 	const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
 
-	// bash results awaiting a claim to check against - the claim always shows
-	// up in the model's *next* text turn, so this can't be checked inline.
+	// bash results awaiting a claim to check against, since the claim always
+	// shows up in the model's *next* text turn, so this can't be checked inline.
 	const grounding = new GroundingClient();
 	const pendingBashResults = new Map<string, RawExecution>();
 
@@ -67,7 +67,7 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 		messages.push({ role: "assistant", content: assistantBlocks });
 
 		// This turn's text is the model's claim about whatever bash calls are
-		// still pending from the previous round - check it before doing anything else.
+		// still pending from the previous round, so check it before doing anything else.
 		if (pendingBashResults.size > 0) {
 			const claimed = extractClaimText(assistantBlocks);
 			for (const exec of pendingBashResults.values()) {
@@ -80,8 +80,8 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 		}
 
 		// Decide continuation by what blocks actually came back, not the stop
-		// reason - keeps this one rule true across every provider, even ones
-		// (like Gemini) whose reported stop reason can't be trusted.
+		// reason, since that keeps one rule true across every provider, even
+		// ones (like Gemini) whose reported stop reason can't be trusted.
 		const hasToolCalls = assistantBlocks.some((b) => b.type === "tool_use");
 		if (!hasToolCalls) break;
 

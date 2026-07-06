@@ -1,4 +1,4 @@
-// Gemini provider - wraps @google/genai.
+// Gemini provider, wraps @google/genai.
 // System prompt goes in config.systemInstruction, not in the messages array.
 
 import { GoogleGenAI } from "@google/genai";
@@ -91,7 +91,7 @@ export function createGeminiProvider(apiKey: string): Provider {
 				}
 			}
 
-			// Gemini always reports end_turn even when it called a tool - the loop
+			// Gemini always reports end_turn even when it called a tool, so the loop
 			// figures out continuation from the tool_use events it already got.
 			yield {
 				type: "message_end",
