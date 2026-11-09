@@ -27,6 +27,9 @@ var (
 	negInside    = regexp.MustCompile(`(?i)\b(not|never|cannot|no longer|unable to|fail(s|ed)? to|prevent(s|ed|ing)?)\b|n't\b`)
 	failWord     = regexp.MustCompile(`(?i)\b(fail(s|ed|ing|ures?)?|errors?|broken)\b`)
 	zeroBefore   = regexp.MustCompile(`(?i)\b(no|0|zero|without|any)\s+(\S+\s+)?$`)
+	argumentPass = regexp.MustCompile(`(?i)\bpass(ed|ing|es)?$`)
+	passedTo     = regexp.MustCompile(`(?i)^\s+(to|into|as|via|along with)\b`)
+	formatClean  = regexp.MustCompile(`(?i)\b(no|none of the) (go |source |\.go )?files? (that )?(need(s|ed)?|requires?|required) (any )?(to be )?(re)?(formatting|formatted|gofmt)\b|\b(does|do|did)( not|n't) need (any )?(re)?(formatting|gofmt)\b|\b(properly|correctly|already|well)[ -]formatted\b|\badheres? to (the )?(go |gofmt )?(formatting|format|style) (guidelines|rules|standards)\b|\bno (formatting|format) (changes|issues|problems)\b|\bno changes (are |were )?(needed|required) for (code |the )?formatting\b`)
 )
 
 type kindPattern struct {
@@ -37,7 +40,7 @@ type kindPattern struct {
 var kindPatterns = []kindPattern{
 	{KindTestsPass, regexp.MustCompile(`(?i)\b(tests?|test suite|specs?|test cases?|suite)\b[^.;,]{0,50}?\b(pass(es|ed|ing)?|succeed(s|ed)?|green|all good)\b|\bpass(es|ed)? (all|every)( of)?( the)? \d* ?tests?\b|\ball (\d+ )?(tests|specs) (are |were )?(now )?(pass|green)`)},
 	{KindLintClean, regexp.MustCompile(`(?i)\b(lint(er|ing|s)?|eslint|biome|ruff|flake8|pylint|mypy|go vet|vet|gofmt|prettier|clippy|type ?check(er|s|ing)?|tsc|shellcheck)\b[^.;,]{0,50}?\b(clean|pass(es|ed|ing)?|no (errors?|warnings?|issues|problems|complaints|findings)|succeed(s|ed)?|happy|green)\b|\bno (lint|linting|type|vet) (errors|issues|warnings|problems)\b`)},
-	{KindBugFixed, regexp.MustCompile(`(?i)\b(fixed|resolved|patched|repaired)\b|\b(bug|issue|error|problem|regression)\b[^.;,]{0,30}\b(is|are|has been|have been|was) (now )?(fixed|resolved|gone)\b|,\s*(thereby\s+)?(resolving|fixing)\s+(the|this|that|these|those|both|all)\s+([\w-]+\s+){0,2}(bugs?|issues?|errors?|problems?|failures?|crash(es)?)\b`)},
+	{KindBugFixed, regexp.MustCompile(`(?i)\b(fixed|resolved|patched|repaired)\b|\b(i|we|i've|we've|i have|we have|has been|have been|was|were|is now|are now)\s+(now\s+|also\s+)?corrected\b|\bwith the (correct|corrected|proper|fixed|right) (implementation|logic|code|condition|version|format string)\b|\b(bug|issue|error|problem|regression)\b[^.;,]{0,30}\b(is|are|has been|have been|was) (now )?(fixed|resolved|gone)\b|,\s*(thereby\s+)?(resolving|fixing)\s+(the|this|that|these|those|both|all)\s+([\w-]+\s+){0,2}(bugs?|issues?|errors?|problems?|failures?|crash(es)?)\b`)},
 	{KindFileCreated, fileVerb},
 	{KindSuccess, regexp.MustCompile(`(?i)^done\b|\b(all done|(is|are|it's|i'm|now) done|completed|succeeded|successful(ly)?|(it|this|that|everything|now) works|works now|(is|are) (now )?working|ran (fine|cleanly|successfully|without (any )?errors)|exit(ed|s)? (with )?(code |status )?0|builds? (passes|succeeds|succeeded|is green)|compiles( cleanly)?)\b`)},
 }
@@ -94,6 +97,12 @@ func classify(sentence string, tagged bool) []Claim {
 			break
 		}
 		loc := firstAssertion(punct, code, kp.pattern, tagged)
+		if kp.kind == KindTestsPass && loc >= 0 {
+			loc = firstTestsPass(punct, code, tagged)
+		}
+		if kp.kind == KindLintClean && loc < 0 {
+			loc = firstFormatClaim(punct, code, tagged)
+		}
 		if loc < 0 {
 			continue
 		}
@@ -146,17 +155,41 @@ func firstAssertion(punct, code string, pattern *regexp.Regexp, tagged bool) int
 }
 
 func assertions(punct, code string, pattern *regexp.Regexp, tagged bool) [][]int {
+	return filterAssertions(punct, code, pattern, tagged, true)
+}
+
+func filterAssertions(punct, code string, pattern *regexp.Regexp, tagged, negatable bool) [][]int {
 	var out [][]int
 	for _, loc := range pattern.FindAllStringIndex(punct, -1) {
 		if !tagged && (hedgePattern.MatchString(code[:loc[1]]) || purposeLead.MatchString(code[:loc[1]])) {
 			continue
 		}
-		if negation.MatchString(code[:loc[0]]) || keptFrom.MatchString(code[:loc[1]]) || negInside.MatchString(code[loc[0]:loc[1]]) {
+		if negation.MatchString(code[:loc[0]]) || keptFrom.MatchString(code[:loc[1]]) {
+			continue
+		}
+		if negatable && negInside.MatchString(code[loc[0]:loc[1]]) {
 			continue
 		}
 		out = append(out, loc)
 	}
 	return out
+}
+
+func firstTestsPass(punct, code string, tagged bool) int {
+	for _, loc := range assertions(punct, code, kindPatterns[0].pattern, tagged) {
+		if argumentPass.MatchString(punct[loc[0]:loc[1]]) && passedTo.MatchString(punct[loc[1]:]) {
+			continue
+		}
+		return loc[0]
+	}
+	return -1
+}
+
+func firstFormatClaim(punct, code string, tagged bool) int {
+	if locs := filterAssertions(punct, code, formatClean, tagged, false); len(locs) > 0 {
+		return locs[0][0]
+	}
+	return -1
 }
 
 var (

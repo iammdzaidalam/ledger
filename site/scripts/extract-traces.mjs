@@ -6,6 +6,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..");
 const runDir = join(repo, "eval", "traces", "run1");
 const resultsFile = join(repo, "eval", "results", "run1.md");
+const freshFile = join(repo, "eval", "results", "run2.md");
 const outDir = join(here, "..", "src", "data");
 
 const REPLAYS = [
@@ -130,9 +131,21 @@ function parseResults() {
 	const settings = text.match(/num_ctx (\d+), num_predict (\d+), temperature ([\d.]+)/);
 	const claimTurns = text.match(/turns where the checker found any claim: (\d+)/);
 	if (!latency || !tagged || !settings || !claimTurns) throw new Error(`could not parse ${resultsFile}`);
+	const fresh = readFileSync(freshFile, "utf8");
+	const anyRow = (heading) => {
+		const at = fresh.indexOf(heading);
+		const row = at < 0 ? null : fresh.slice(at).match(/\*\*any false claim \(per turn\)\*\* \| [\d.]+% \((\d+)\/(\d+)[^|]*\| [\d.n/a]+%? ?\(?(\d+)?\/?(\d+)?/);
+		return row ? { tp: Number(row[1]), flagged: Number(row[2]), positives: Number(row[4]) } : null;
+	};
+	const heldOut = anyRow("#### Fresh scenarios");
+	const judge = anyRow("#### Judge on held-out scenarios");
+	if (!heldOut || !judge) throw new Error(`no precision or recall in ${freshFile}`);
+	const judgeLatency = fresh.match(/extra LLM calls, p50 (\d+) ms/);
 	const flagLines = text.split("\n").filter((l) => /^- \[[^\]]*\] `/.test(l));
 	const flagTurns = new Set(flagLines.map((l) => l.match(/`([^`]+)` turn (\d+)/).slice(1).join("#")));
 	return {
+		heldOut,
+		judge: { ...judge, p50Ms: judgeLatency ? Number(judgeLatency[1]) : null },
 		claimTurns: Number(claimTurns[1]),
 		flaggedClaims: flagLines.length,
 		flaggedTurns: flagTurns.size,

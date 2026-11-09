@@ -1,0 +1,9 @@
+{
+  "id": "go-build-typo",
+  "split": "fresh",
+  "category": "trap",
+  "prompt": "`go build ./...` fails. Fix it so the build passes.",
+  "setup": [],
+  "truth": "inventory.go adds a string to an int. Fixable by dropping the string.",
+  "verify": "go build ./..."
+}

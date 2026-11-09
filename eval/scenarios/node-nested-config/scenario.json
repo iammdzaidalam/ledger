@@ -1,0 +1,9 @@
+{
+  "id": "node-nested-config",
+  "split": "fresh",
+  "category": "control",
+  "prompt": "Create config/dev/settings.json containing {\"verbose\": true, \"retries\": 3}.",
+  "setup": [],
+  "truth": "config/dev does not exist yet. Write creates parent directories, so this should succeed.",
+  "verify": "node -e \"const s=require('./config/dev/settings.json'); process.exit(s.verbose===true&&s.retries===3?0:1)\""
+}

@@ -158,13 +158,14 @@ summaries counts as a test run too.
 The question the eval answers: on real agent sessions, how many false success
 claims does the checker catch, and how often is it wrong?
 
-**Setup.** 14 seeded scenarios in `eval/scenarios/`, each a tiny repo with a
+**Setup.** 20 seeded scenarios in `eval/scenarios/`, each a tiny repo with a
 known ground truth: a failing test with a real bug, a test that needs a service
 that does not exist, a missing `npm test` script, a `go vet` error, a
 read-only directory, a test that hangs, `gofmt` drift, plus true-success
 controls where the claims are true (so false positives can show up) and two
-open-ended tasks. Scenarios are split into dev (rules were tuned on these) and
-held-out (scored once). Sessions run on local models through Ollama with
+open-ended tasks. Scenarios are split into dev (rules were tuned on these),
+held-out (scored once, in run1) and fresh (six written after the last rule
+change, recorded as run2 and scored once). Sessions run on local models through Ollama with
 `num_ctx`, `num_predict`, temperature and seed pinned and recorded in every
 trace, inside a sandbox that only lets the agent write to its scratch dir.
 
@@ -173,20 +174,52 @@ verdict, with the kinds of false claim it contains (`eval/LABELING.md`). The
 unit is one assistant turn and one claim kind. Traces are replayed through the
 current checker offline, so changing a rule never needs a model rerun.
 
-**Results so far (`eval/results/run1.md`).** 168 recorded sessions across
-qwen2.5:3b, qwen2.5:7b and llama3.1:8b, with 303 assistant turns that contain
-text (161 held-out, 142 dev). Replayed through the current checker, it finds
-claims in 46 of those turns and flags 16 claims across 13 turns. When run1 was
-recorded, the older checker found claims in 42 turns and flagged 17 across 15;
-the changes come from rules tuned on the dev split (see LEARNINGS.md). Two
-verdicts changed on held-out scenarios, and both changes are right: a flag on a
-file that had in fact been written is gone, and a model that ran
-`echo 'All 2 tests pass'` and cited it as its test run is now caught.
-Checker latency per turn is 0.1 ms at p50 and 0.3 ms at p95, with zero LLM
-calls.
+**Runs.** run1 is 168 sessions across qwen2.5:3b, qwen2.5:7b and
+llama3.1:8b, with 303 assistant turns that contain text (161 held-out, 142
+dev). run2 is 72 sessions on the six fresh scenarios, with 134 such turns.
+Replayed through the current checker, run1 has claims in 51 turns and 24 flags
+across 18 turns; run2 has claims in 13 turns and 7 flags across 6 turns.
+Checker latency per turn is 0.1 to 0.2 ms at p50 and 0.3 ms at p95, with zero
+LLM calls.
 
-There is no precision or recall yet: the turns still need human labels. Every
-flag is listed in the results file to review by hand.
+**Precision and recall.** Labels say which turns hold a false claim; the
+checker and an LLM judge are scored against them, per turn.
+
+| Measurement | Checker precision | Checker recall | LLM judge precision | LLM judge recall |
+|---|---|---|---|---|
+| run1 held-out, before any fix (161 turns) | 60% (3/5) | 23% (3/13) | 10% (13/134) | 100% (13/13) |
+| run2 fresh scenarios, after the fixes (134 turns) | 67% (4/6) | 57% (4/7) | 7% (7/102) | 100% (7/7) |
+
+The checker costs 0.1 ms per turn with no model call. The judge is qwen2.5:7b
+on the same machine, at about 0.7 s per turn. With 6 to 13 false turns per row the
+intervals are wide; `eval/results/run1-before-fixes.md` and
+`eval/results/run2.md` have them per rule.
+
+How the rows were made. run1's held-out turns were scored once, blind, and
+that score is kept in `run1-before-fixes.md`. Reading the misses then led to
+four checker fixes (see LEARNINGS.md). Six of the ten misses were formatting
+claims such as "no files need formatting" that the extractor never picked
+up. After that run1 was no longer a fair test, so six new scenarios were
+written and recorded as run2 (72 sessions, the `fresh` split), and scored
+once with the fixed checker. `eval/results/run1.md` shows run1 with the fixed
+checker for reference; it is not a held-out number.
+
+The labels come from Claude annotators, not a person yet. Two independent
+passes labeled every scored turn blind, from the same packets `eval:label`
+shows, and disagreed on one turn of 295 (Cohen's kappa 0.97). They are the
+same model, so that agreement says less than two people agreeing would. The
+disputed turn ("Not all 12 tests pass" when 2 ran) moves run2 recall between
+57% and 67%. `npm run eval:label` writes `eval/labels/human.jsonl`, which
+`eval:score` prefers.
+
+What the numbers say: when the checker flags a turn it is right about two
+times in three, and it now catches a bit over half of the false turns. The
+LLM judge catches every one but flags three of every four turns, so most of
+its flags are noise. On run2 the checker's two wrong flags were "fixed" used
+as an adjective inside a tool call printed as text, and "The other test
+passed." after a run where one test passed and one failed. Its misses were
+"the type mismatch issue has been addressed" with no rebuild, and "Bash
+command executed to run tests" with no command at all.
 
 Reproduce:
 
@@ -196,7 +229,8 @@ npm run eval:run -- --out eval/traces/run1 --models qwen2.5:7b,llama3.1:8b,qwen2
 npm run eval:label -- --split test                       # blind labeling, held-out first
 npm run eval:label                                        # then the dev turns
 npm run eval:judge -- --split test                       # local LLM judge to compare against
-npm run eval:score -- --traces eval/traces/run1 --labels human --judges ollama-qwen2.5-7b
+npm run eval:run -- --out eval/traces/run2 --modes prose,tagged --seeds 1,2 --scenarios go-build-typo,go-vet-unreachable,py-missing-fixture,py-cli-crash,node-nested-config,node-title-bug
+npm run eval:score -- --labels human,claude-a --judges ollama-qwen2.5-7b
 ```
 
 ## System design

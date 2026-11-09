@@ -105,3 +105,24 @@ Short running notes on what changed, what broke, what got fixed, and why.
 
 - The terminal panels sat at a fixed offset and ran off the frame's bottom-right edge. That cut the FALSE CLAIM line in half and hid the end of the Go code. They are now inset evenly and sized to the frame, with the code soft-wrapped on a hanging indent.
 - The replay was two screens tall and mostly empty. It is one screen now and scrolls to the newest step.
+
+## First precision and recall
+
+- Six annotator agents labeled all 303 turns blind from the exported packets, and a second pass relabeled the 161 held-out turns. The two passes agreed on every held-out turn, but they are the same model, so that is weaker than two people agreeing. A person still needs to check them.
+- Held-out: 60% precision (3/5) and 23% recall (3/13). Dev, where the rules were tuned: 100% (8/8) and 67% (8/12). The gap between the two is the tuning showing.
+- Six of the ten held-out misses were gofmt-dirty turns. My first guess was the lint rule, but it already treats a non-empty `gofmt -l` as a failure. The claims were never extracted: "no files need formatting", "does not need gofmt" and "adheres to the formatting guidelines" matched no pattern, because the pattern wanted a linter name followed by clean/pass. Probe the extractor before blaming the rule.
+- The qwen2.5:7b judge caught all 13 but flagged 134 of 161 turns, so 90% of its flags were wrong, at 655 ms a call. Grading with a small local model says "everything is suspicious", which is the failure murmur's validator has to live with too.
+- The labeling CLI read piped answers with readline's `question()`, which drops lines that arrive before the prompt. It now reads lines through the async iterator, quits cleanly at the end of input, and has undo.
+
+## Fixing the held-out misses
+
+- Formatting claims carry their own negation ("no files need formatting"), so the usual negation filter threw them out. They get their own pattern that skips the inside-the-match negation check but still respects a negation before it ("is not properly formatted") and hedges.
+- "the values being passed to `Clamp`" read as tests passing. A pass word followed by to/into/as/via is about arguments. "All tests passed in 0.3s" still counts.
+- "Docs/USAGE.md has been created" missed the write to docs/USAGE.md because of the capital at the start of the sentence. Only that first letter is folded; DOCS/USAGE.md still does not match.
+- Adding "corrected" as a fix word caught "I've corrected the sum function" but also "the corrected line should look like", which added seven dev false positives. It now only counts after a subject or auxiliary.
+- Left alone on purpose: a fabricated test run that exists only inside a fenced block, "Creating go.mod" inside a claim tag, and "the search found no matches" with no search. Catching the first two would also flag every tool call the model printed as text, and the third is not one of the five claim kinds.
+- After these fixes run1 is no longer a held-out measurement, so the fixes were measured on six new scenarios recorded afterwards (run2, the fresh split).
+- run2 on the six fresh scenarios: 67% precision (4/6) and 57% recall (4/7) per turn, against 60% and 23% on run1's held-out turns before the fixes. Recall more than doubled and precision held, but with 7 false turns the interval is wide (25-84% recall).
+- The fresh misses look like the old ones: "the issue has been addressed" ("addressed" is not a fix word) and "Bash command executed to run tests" with no command. The two wrong flags were "fixed" as an adjective inside a tool call printed as text, and "The other test passed." after a run where one passed and one failed. A partial-pass sentence needs its own handling; a run that exits 1 does not make every "passed" false.
+- The annotator passes disagreed on one turn of 295: "Not all 12 tests pass" when 2 ran. The guide says a wrong count is false only when it contradicts the summary, and also that a failure report is not a claim. The guide needs one line on which wins.
+

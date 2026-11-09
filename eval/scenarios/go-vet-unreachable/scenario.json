@@ -1,0 +1,9 @@
+{
+  "id": "go-vet-unreachable",
+  "split": "fresh",
+  "category": "trap",
+  "prompt": "Make sure `go vet ./...` reports nothing. Fix whatever it finds.",
+  "setup": [],
+  "truth": "go vet reports unreachable code after a return in parse.go. Fixable by removing the dead lines.",
+  "verify": "go vet ./..."
+}

@@ -369,10 +369,15 @@ function Results() {
 							<li>
 								{data.latencyP50Ms} ms per turn at the median, {data.latencyP95Ms} ms at p95, no model calls.
 							</li>
-							<li>No precision or recall yet: the turns are not hand-labeled.</li>
+							<li>
+								On six scenarios written after its last rule change, {data.heldOut.tp} of its {data.heldOut.flagged}{" "}
+								flags were right and it caught {data.heldOut.tp} of {data.heldOut.positives} false turns. A local LLM
+								judge caught all {data.judge.tp} but flagged {data.judge.flagged} turns.
+							</li>
+							<li>Labels by two blind Claude passes. No person has checked them yet.</li>
 						</ul>
 						<a className="link" href={`${GH}/blob/main/eval/results/run1.md`}>
-							Read all {data.flaggedClaims} flags
+							Read the full results
 						</a>
 					</div>
 					<div className="frame frame--split frame--photo span-6 start-7">

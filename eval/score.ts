@@ -171,17 +171,20 @@ if (!primary) {
 		`## Heuristic checker vs labels (${primaryName}, ${labeledRows.length}/${rows.length} turns labeled)`,
 		"",
 	);
-	for (const split of ["test", "dev"]) {
-		const subset = rows.filter((r) => r.session.meta.split === split);
+	if (primaryName?.startsWith("claude"))
 		out.push(
-			metricsTable(
-				split === "test" ? "Held-out scenarios" : "Dev scenarios (rules were tuned here)",
-				subset,
-				primary,
-				(r) => r.predicted,
-			).text,
+			"Labels by Claude annotators working blind from the exported packets (`eval:label --export`), without the checker's verdicts. No person has reviewed them yet.",
 			"",
 		);
+	const SPLITS = [
+		["fresh", "Fresh scenarios (written after the last rule change, never used for tuning)"],
+		["test", "Held-out scenarios"],
+		["dev", "Dev scenarios (rules were tuned here)"],
+	] as const;
+	for (const [split, title] of SPLITS) {
+		const subset = rows.filter((r) => r.session.meta.split === split);
+		if (subset.length === 0) continue;
+		out.push(metricsTable(title, subset, primary, (r) => r.predicted).text, "");
 	}
 
 	out.push(
@@ -234,24 +237,9 @@ if (!primary) {
 			`${verdicts.size} turns judged, ${verdicts.size} extra LLM calls, p50 ${quantile(lat, 0.5).toFixed(0)} ms, p95 ${quantile(lat, 0.95).toFixed(0)} ms per call`,
 			"",
 		);
-		out.push(
-			metricsTable(
-				"Judge on held-out scenarios",
-				judged.filter((r) => r.session.meta.split === "test"),
-				primary,
-				predict,
-			).text,
-			"",
-		);
-		out.push(
-			metricsTable(
-				"Heuristics on the same turns",
-				judged.filter((r) => r.session.meta.split === "test"),
-				primary,
-				(r) => r.predicted,
-			).text,
-			"",
-		);
+		const unseen = judged.filter((r) => r.session.meta.split !== "dev");
+		out.push(metricsTable("Judge on held-out scenarios", unseen, primary, predict).text, "");
+		out.push(metricsTable("Heuristics on the same turns", unseen, primary, (r) => r.predicted).text, "");
 	}
 
 	if (labelSets.size > 1) {

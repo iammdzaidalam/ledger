@@ -106,6 +106,16 @@ func SamePath(claimed, actual string) bool {
 	}
 	c := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(claimed, "./")))
 	a := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(actual, "./")))
+	if samePath(c, a) {
+		return true
+	}
+	if first := c[0]; first >= 'A' && first <= 'Z' {
+		return samePath(string(first+('a'-'A'))+c[1:], a)
+	}
+	return false
+}
+
+func samePath(c, a string) bool {
 	return c == a || strings.HasSuffix(a, "/"+c) || strings.HasSuffix(c, "/"+a)
 }
 

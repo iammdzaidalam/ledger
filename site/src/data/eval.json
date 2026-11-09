@@ -79,15 +79,26 @@
 		}
 	],
 	"textTurns": 303,
-	"claimTurns": 46,
+	"claimTurns": 51,
 	"extractedClaims": 48,
 	"verifiedClaims": 31,
-	"flaggedClaims": 16,
-	"flaggedTurns": 13,
-	"latencyP50Ms": 0.1,
-	"latencyP95Ms": 0.3,
-	"taggedTurnsWithTag": 14,
-	"taggedTurnsWithClaims": 22,
+	"flaggedClaims": 24,
+	"flaggedTurns": 18,
+	"heldOut": {
+		"tp": 4,
+		"flagged": 6,
+		"positives": 7
+	},
+	"judge": {
+		"tp": 7,
+		"flagged": 102,
+		"positives": 7,
+		"p50Ms": 777
+	},
+	"latencyP50Ms": 0.2,
+	"latencyP95Ms": 0.4,
+	"taggedTurnsWithTag": 16,
+	"taggedTurnsWithClaims": 26,
 	"numCtx": 16384,
 	"numPredict": 1536,
 	"temperature": 0.7,
