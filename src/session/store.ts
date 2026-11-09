@@ -3,6 +3,14 @@ import { dirname } from "node:path";
 import type { Message } from "../types.js";
 import type { SessionEntry } from "./types.js";
 
+// One id per CLI invocation, unique enough for a personal dev tool without
+// pulling in a UUID dependency for it.
+export function defaultSessionId(): string {
+	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+	const suffix = Math.random().toString(36).slice(2, 8);
+	return `${stamp}-${suffix}`;
+}
+
 // Sessions are append-only JSONL, one message per line. Simple to append to
 // mid-run and simple to reconstruct, no compaction or resume logic yet.
 export async function appendMessage(sessionPath: string, message: Message): Promise<void> {
