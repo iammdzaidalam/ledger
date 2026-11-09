@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { runAgent } from "../src/agent/loop.js";
-import type { AgentEvent } from "../src/agent/types.js";
+import type { AgentEvent, AgentOptions } from "../src/agent/types.js";
 import { GroundingClient } from "../src/grounding/client.js";
 import { EvidenceLog } from "../src/grounding/evidence.js";
 import type { CompletionOptions, Provider, StreamEvent } from "../src/providers/types.js";
@@ -31,7 +31,12 @@ function scripted(steps: Step[], seen: Message[][]): Provider {
 	};
 }
 
-async function collect(steps: Step[], extra: { feedback?: boolean; claimsMode?: "prose" | "tagged" } = {}) {
+type Extra = Pick<
+	AgentOptions,
+	"feedback" | "claimsMode" | "validate" | "maxRevisions" | "maxRevisionsPerRun"
+>;
+
+async function collect(steps: Step[], extra: Partial<Extra> = {}) {
 	const seen: Message[][] = [];
 	const events: AgentEvent[] = [];
 	for await (const e of runAgent({
@@ -105,5 +110,138 @@ describe("runAgent grounding", () => {
 		expect(events.find((e) => e.type === "grounding_flag")).toMatchObject({
 			claim: { attribution: "tag", verdict: "contradicted" },
 		});
+	});
+});
+
+const FAIL = "echo '      Tests  1 failed | 2 passed (3)'; exit 1";
+const PASS = "echo '      Tests  3 passed (3)'";
+
+function pick<T extends AgentEvent["type"]>(events: AgentEvent[], type: T) {
+	return events.filter((e): e is Extract<AgentEvent, { type: T }> => e.type === type);
+}
+
+function ledgerOf(events: AgentEvent[]) {
+	return pick(events, "agent_end")[0]?.ledger;
+}
+
+describe("runAgent revision loop", () => {
+	it("sends focused feedback for a lie and accepts the corrected revision", async () => {
+		client = new GroundingClient();
+		const { events, seen } = await collect(
+			[{ bash: FAIL }, { text: "All tests pass." }, { bash: PASS }, { text: "All tests pass now." }],
+			{ validate: "revise" },
+		);
+
+		const [request] = pick(events, "grounding_revision_requested");
+		expect(request).toMatchObject({ turn: 2, round: 1, maxRevisions: 1 });
+		const feedback = String(seen[2]?.at(-1)?.content);
+		expect(feedback).toContain('"All tests pass."');
+		expect(feedback).toContain("contradicted by c1");
+		expect(feedback).toContain("1 failed");
+		expect(feedback).toContain("rerun the tests");
+
+		const results = pick(events, "grounding_revision_result");
+		expect(results).toHaveLength(1);
+		expect(results[0]).toMatchObject({
+			turn: 4,
+			originTurn: 2,
+			next: "accepted",
+			outcomes: [{ outcome: "corrected", how: "verified", revised: { ref: "c2", verdict: "verified" } }],
+		});
+		expect(ledgerOf(events)).toMatchObject({
+			unverified: false,
+			revisionsRequested: 1,
+			entries: [{ status: "corrected", correctedBy: "verified", firstVerdict: "contradicted", revisions: 1 }],
+		});
+	});
+
+	it("counts a revision that drops the claim as a retraction", async () => {
+		client = new GroundingClient();
+		const { events } = await collect(
+			[{ bash: FAIL }, { text: "All tests pass." }, { text: "Sorry, one test is still failing." }],
+			{ validate: "revise" },
+		);
+		expect(pick(events, "grounding_revision_result")[0]).toMatchObject({
+			next: "accepted",
+			outcomes: [{ outcome: "corrected", how: "retracted" }],
+		});
+		expect(ledgerOf(events)?.entries[0]).toMatchObject({ status: "corrected", correctedBy: "retracted" });
+	});
+
+	it("stops after the revision budget when the model lies twice", async () => {
+		client = new GroundingClient();
+		const { events, seen } = await collect(
+			[{ bash: FAIL }, { text: "All tests pass." }, { text: "All tests pass." }, { text: "unused" }],
+			{ validate: "revise" },
+		);
+		expect(seen).toHaveLength(3);
+		expect(pick(events, "grounding_revision_requested")).toHaveLength(1);
+		expect(pick(events, "grounding_revision_result")[0]).toMatchObject({
+			next: "exhausted",
+			outcomes: [{ outcome: "still_false", revised: { verdict: "contradicted" } }],
+		});
+		expect(ledgerOf(events)).toMatchObject({
+			unverified: true,
+			falseClaims: 1,
+			entries: [{ status: "false", verdict: "contradicted", revisions: 1 }],
+		});
+	});
+
+	it("feeds back a new false claim introduced by the revision", async () => {
+		client = new GroundingClient();
+		const { events, seen } = await collect(
+			[
+				{ bash: FAIL },
+				{ text: "All tests pass." },
+				{ text: "Sorry, one test is still failing. I created notes.txt with the details." },
+				{ text: "I did not write notes.txt after all." },
+			],
+			{ validate: "revise", maxRevisions: 2 },
+		);
+		const results = pick(events, "grounding_revision_result");
+		expect(results.map((r) => r.next)).toEqual(["revise", "accepted"]);
+		expect(results[0]?.outcomes).toMatchObject([
+			{ outcome: "corrected", how: "retracted", claim: { kind: "tests_pass" } },
+			{ outcome: "new_false", claim: { kind: "file_created", verdict: "unsupported" } },
+		]);
+		const second = String(seen[3]?.at(-1)?.content);
+		expect(second).toContain("revision 2 of 2");
+		expect(second).toContain("notes.txt");
+		expect(second).not.toContain("All tests pass");
+		expect(ledgerOf(events)?.entries).toMatchObject([
+			{ kind: "tests_pass", status: "corrected" },
+			{ kind: "file_created", status: "corrected", newInRevision: true },
+		]);
+	});
+
+	it("gives each flagged turn its own budget, capped per run", async () => {
+		client = new GroundingClient();
+		const lie = { text: "Done, it worked.", bash: "exit 1" };
+		const { events, seen } = await collect(
+			[{ bash: "exit 1" }, lie, lie, lie, lie, { text: "Done, it worked." }, { text: "unused" }],
+			{ validate: "revise", maxRevisions: 1, maxRevisionsPerRun: 2 },
+		);
+		expect(seen).toHaveLength(6);
+		expect(pick(events, "grounding_revision_requested").map((r) => r.originTurn)).toEqual([2, 4]);
+		expect(pick(events, "grounding_revision_result").map((r) => r.next)).toEqual(["exhausted", "exhausted"]);
+		const ledger = ledgerOf(events);
+		expect(ledger?.revisionsRequested).toBe(2);
+		expect(ledger?.entries.map((e) => [e.turn, e.status, e.revisions])).toEqual([
+			[2, "false", 1],
+			[4, "false", 1],
+			[6, "false", 0],
+		]);
+	});
+
+	it("only shows flags in flag mode and skips the checker when off", async () => {
+		client = new GroundingClient();
+		const flagged = await collect([{ bash: FAIL }, { text: "All tests pass." }, { text: "unused" }]);
+		expect(flagged.seen).toHaveLength(2);
+		expect(pick(flagged.events, "grounding_revision_requested")).toHaveLength(0);
+		expect(ledgerOf(flagged.events)).toMatchObject({ mode: "flag", falseClaims: 1 });
+
+		const off = await collect([{ bash: FAIL }, { text: "All tests pass." }], { validate: "off" });
+		expect(pick(off.events, "grounding_check")).toHaveLength(0);
+		expect(ledgerOf(off.events)?.entries).toEqual([]);
 	});
 });

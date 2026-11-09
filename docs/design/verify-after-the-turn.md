@@ -1,6 +1,7 @@
 # Why Ledger verifies claims after the turn, not at the tool call
 
-Status: implemented in 0.2.0. Applies to `src/agent/loop.ts` and `checker/`.
+Status: implemented in 0.2.0. Applies to `src/agent/loop.ts`,
+`src/grounding/` and `checker/`.
 
 ## The problem in one example
 
@@ -45,8 +46,11 @@ sequenceDiagram
     L->>C: turn text + evidence log [c1] + fresh [c1]
     C-->>L: tests_pass: contradicted (`npm test` exited 1, 2 failed)
     L-->>U: [FALSE CLAIM] shown under the message
-    opt --feedback
-        L->>M: verdict appended to the next tool result or user message
+    opt --validate revise or strict
+        L->>M: focused feedback on the false claims
+        M-->>L: revised turn
+        L->>C: revised text + evidence
+        C-->>L: corrected / still_false / new_false per claim
     end
 ```
 
@@ -85,6 +89,74 @@ see:
 - A claim about a run that is stale. If the last passing test run happened
   before a later edit, "tests pass" is `unverifiable`, not `verified`.
 
+## Revising a false claim
+
+`--validate` picks what happens after a flag: `off` skips the checker,
+`flag` (the default) only shows it, `revise` sends it back, and `strict`
+sends it back and fails the run if it is still false at the end. The state
+for this lives in `src/grounding/validation.ts`; the loop only calls it once
+per turn.
+
+```
+            check turn N
+                 │
+     contradicted or unsupported claims?
+         no │            │ yes
+            ▼            ▼
+         accepted   mode is flag, or no budget left?
+                         yes │          │ no
+                             ▼          ▼
+                     stays false   send feedback (round 1)
+                     in the ledger      │
+                                        ▼
+                     wait for the revised turn: the first later turn that
+                     makes a claim or ends without a tool call
+                                        │
+                        match each original claim by kind, then text,
+                        ref or file path
+                                        │
+       ┌──────────────────┬─────────────┴───────┬───────────────────┐
+       ▼                  ▼                     ▼                   ▼
+   not repeated      now verified          still false        new false claim
+   corrected         corrected             still_false        new_false
+   (retracted)                                  │                   │
+                                                └─────────┬─────────┘
+                                                          ▼
+                                       round < --max-revisions and run cap
+                                       not reached? ── yes ──▶ next round
+                                                          │ no
+                                                          ▼
+                                       stays false; strict marks the answer
+                                       [UNVERIFIED] and print mode exits 2
+```
+
+A few choices in there are worth spelling out:
+
+- **Only `contradicted` and `unsupported` go back.** `unverifiable` means the
+  evidence cannot settle the claim, for example a test run that went stale
+  after an edit. Asking the model to "fix" that would push it to retract
+  true statements. It shows up dimmed in the ledger instead.
+- **The revised turn can call tools first.** The fix for "tests pass" after
+  a failing run is usually to rerun the tests, so turns that only call tools
+  do not count as the answer. The model gets to do the work.
+- **The revised turn is checked with the original turn's fresh refs too.**
+  Without that, a model that repeats "Done, it worked." without running
+  anything has no fresh command to attribute it to, the checker skips the
+  claim, and it would look like a retraction.
+- **The budget is per flagged turn, with a cap per run.** A run-wide budget
+  of one meant a lie at turn 15 got no feedback because turn 3 used it up.
+  Per-turn budgets fix that, and the run cap (default three times the
+  per-turn budget) keeps a model that lies every turn from looping.
+- **Retracted is a guess.** If the revised turn no longer makes a claim of
+  that kind about that thing, it counts as corrected. "Sorry, one test still
+  fails" and "OK." both drop the claim. An empty revised turn does not count.
+
+At the end of the run the loop puts the ledger on `agent_end`: every claim,
+its first and final verdict, whether it was corrected and how, and how many
+revision rounds it took. The events in between are
+`grounding_revision_requested` and `grounding_revision_result`; the older
+`grounding_check` and `grounding_flag` events are unchanged.
+
 ## Alternatives considered
 
 | Option | What it can catch | Why not |
@@ -93,14 +165,17 @@ see:
 | Same-turn "claim" tool | Exact claim-to-call mapping | The claim precedes the output, so it is a prediction. It also adds a tool round trip per claim. |
 | Check while streaming | Stops a sentence mid-lie | Sentences resolve late ("tests pass, except two"), hedges come after the verb, and a half-printed line has to be retracted. The post-turn check costs milliseconds, so there is nothing to win by going earlier. |
 | A second LLM as judge | Fuzzier claims | One extra model call per turn, non-deterministic, and its own hallucinations. Kept as an eval baseline (`eval/judge.ts`), not the product path. |
+| Rerun the turn from scratch with feedback | A clean answer with no lie in the transcript | Throws away tool calls the model already made, and the rerun can make different calls. Ledger keeps the transcript and asks for a correction in the next turn. |
 | **Post-turn, deterministic (chosen)** | Claims about tests, lint, file creation, fixes, generic success | Flags appear after the message, not instead of it. |
 
 ## Trade-offs we accept
 
 - **The lie is printed before the flag.** The user sees the sentence, then the
   flag directly under it. Hiding text until it is checked would make every turn
-  feel slower for a check that takes a few milliseconds. `--feedback` closes
-  the loop by sending the verdict back so the next turn has to correct it.
+  feel slower for a check that takes a few milliseconds. `--validate revise`
+  closes the loop by sending the verdict back so the next turn has to correct
+  it, and the original sentence stays in the transcript next to its
+  correction.
 - **Prose extraction is a heuristic.** Claims are found with sentence
   splitting, kind patterns, and hedge and negation guards. Paraphrases it does
   not know about are missed. The eval measures how often.
@@ -113,7 +188,8 @@ see:
   O(n)" has no tool output to compare against and is ignored.
 - **The checker can be missing.** If the binary is not there, every check comes
   back empty with an error and the agent keeps working. Grounding degrades, it
-  never blocks.
+  never blocks, except in `strict` mode, where a checker error counts as
+  unverified so a CI job cannot pass just because nothing was checked.
 
 ## Cost
 

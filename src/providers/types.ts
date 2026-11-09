@@ -22,6 +22,7 @@ export interface CompletionOptions {
 	tools: ToolDefinition[];
 	max_tokens: number;
 	temperature?: number;
+	signal?: AbortSignal;
 }
 
 export interface Provider {

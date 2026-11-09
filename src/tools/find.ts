@@ -4,6 +4,7 @@ import { errorResult, okResult } from "./types.js";
 
 export const findTool: Tool = {
 	name: "Find",
+	readOnly: true,
 	description: "Find files by glob pattern (e.g. src/**/*.ts).",
 	inputSchema: {
 		type: "object",

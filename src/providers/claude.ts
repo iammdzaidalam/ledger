@@ -59,14 +59,17 @@ export function createClaudeProvider(apiKey: string): Provider {
 
 			consola.debug(`claude: ${options.model}, ${options.messages.length} turns, ${tools.length} tools`);
 
-			const stream = client.messages.stream({
-				model: options.model,
-				system: options.system,
-				messages: toAnthropicMessages(options.messages),
-				tools: tools.length > 0 ? tools : undefined,
-				max_tokens: options.max_tokens,
-				temperature: options.temperature,
-			});
+			const stream = client.messages.stream(
+				{
+					model: options.model,
+					system: options.system,
+					messages: toAnthropicMessages(options.messages),
+					tools: tools.length > 0 ? tools : undefined,
+					max_tokens: options.max_tokens,
+					temperature: options.temperature,
+				},
+				{ signal: options.signal },
+			);
 
 			// track which content_block index is text vs tool_use so deltas route right
 			const blockKinds: Record<number, "text" | "tool_use"> = {};

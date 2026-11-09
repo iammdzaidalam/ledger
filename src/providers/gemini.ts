@@ -75,6 +75,7 @@ export function createGeminiProvider(apiKey: string): Provider {
 					tools,
 					maxOutputTokens: options.max_tokens,
 					temperature: options.temperature,
+					abortSignal: options.signal,
 				},
 			});
 

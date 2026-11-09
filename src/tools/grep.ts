@@ -7,6 +7,7 @@ const MAX_MATCHES = 200;
 
 export const grepTool: Tool = {
 	name: "Grep",
+	readOnly: true,
 	description: "Search file contents with a regex, across a glob of files.",
 	inputSchema: {
 		type: "object",

@@ -5,6 +5,7 @@ import { errorResult, okResult } from "./types.js";
 
 export const lsTool: Tool = {
 	name: "Ls",
+	readOnly: true,
 	description: "List a directory's entries with type and size.",
 	inputSchema: {
 		type: "object",

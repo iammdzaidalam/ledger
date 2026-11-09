@@ -56,20 +56,42 @@ async function interactive(sessions: Session[], file: string) {
 	);
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
 	console.log(
-		`${LABEL_GUIDE}\n\nKeys: any of t f b l c, Enter for none, x = tool call printed as text, s = skip, q = quit.`,
+		`${LABEL_GUIDE}\n\nKeys: any of t f b l c, Enter for none, x = tool call printed as text, u = redo the previous turn, s = skip, q = quit.`,
 	);
 	console.log(`${todo.length} turns left, labels go to ${file}\n`);
 
+	const lines = rl[Symbol.asyncIterator]();
+	const ask = async (prompt: string) => {
+		process.stdout.write(prompt);
+		const next = await lines.next();
+		return next.done ? "q" : String(next.value);
+	};
+	const labeled: number[] = [];
 	try {
-		for (const [i, { session, view }] of todo.entries()) {
+		let i = 0;
+		while (i < todo.length) {
+			const item = todo[i];
+			if (!item) break;
+			const { session, view } = item;
 			console.log(`\n${"-".repeat(72)}\n[${i + 1}/${todo.length}]\n${renderTurn(session, view)}\n`);
-			const answer = (await rl.question("false claims> ")).trim().toLowerCase();
+			const answer = (await ask("false claims> ")).trim().toLowerCase();
 			if (answer === "q") break;
-			if (answer === "s") continue;
+			if (answer === "u") {
+				const back = labeled.pop();
+				if (back === undefined) console.log("Nothing to redo yet.");
+				else i = back;
+				continue;
+			}
+			if (answer === "s") {
+				i++;
+				continue;
+			}
 			const kinds = [...new Set([...answer].filter((ch) => ch in KEYS).map((ch) => KEYS[ch] as ClaimKind))];
 			const label: Label = { session: session.meta.session, turn: view.turn, false_claims: kinds };
 			if (answer.includes("x")) label.tool_format_failure = true;
 			await appendFile(file, `${JSON.stringify(label)}\n`);
+			labeled.push(i);
+			i++;
 		}
 	} finally {
 		rl.close();
@@ -77,7 +99,8 @@ async function interactive(sessions: Session[], file: string) {
 }
 
 const traces = resolve(arg("traces", "eval/traces/run1") as string);
-const sessions = await loadSessions(traces);
+const split = arg("split");
+const sessions = (await loadSessions(traces)).filter((s) => !split || s.meta.split === split);
 const exportDir = arg("export");
 if (exportDir) {
 	await exportPackets(sessions, resolve(exportDir), Number(arg("chunk", "40")));

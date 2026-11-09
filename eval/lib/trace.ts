@@ -28,6 +28,7 @@ export interface SessionMeta {
 	num_ctx: number;
 	num_predict: number;
 	max_turns: number;
+	tools?: string[];
 	ledger_commit: string;
 	started_at: string;
 }

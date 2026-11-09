@@ -1,32 +1,55 @@
 import { createInterface } from "node:readline/promises";
 import { consola } from "consola";
-import { runAgent } from "../agent/loop.js";
+import { BUILTIN_COMMANDS } from "../commands/builtin.js";
+import { type ReplState, runCommandLine } from "../commands/registry.js";
 import { GroundingClient } from "../grounding/client.js";
-import { EvidenceLog } from "../grounding/evidence.js";
-import { formatFlag } from "../grounding/format.js";
-import type { ClaimsMode } from "../grounding/types.js";
-import { appendMessage } from "../session/store.js";
-import type { Message } from "../types.js";
+import { formatLedger, formatUnverified } from "../grounding/format.js";
+import { createPolicy } from "../permissions/policy.js";
+import { terminalAsker } from "../permissions/prompt.js";
+import type { PermissionSettings } from "../permissions/types.js";
+import { readableError } from "../providers/errors.js";
+import type { ActiveSession } from "../session/active.js";
+import { runTurn, type TurnSettings } from "./turn.js";
 
 export interface InteractiveOptions {
-	providerName: string;
-	model: string;
-	system: string;
+	session: ActiveSession;
+	turn: Omit<TurnSettings, "permissions">;
+	permissions?: PermissionSettings;
+	yes: boolean;
 	initialMessage?: string;
-	maxTurns?: number;
-	claimsMode?: ClaimsMode;
-	feedback?: boolean;
-	sessionPath: string;
+	resumed: boolean;
+}
+
+function banner(session: ActiveSession, resumed: boolean): string {
+	const lines = [
+		`ledger (${session.providerName}/${session.model}), session ${session.id}`,
+		"/help for commands, Ctrl+C to quit.",
+	];
+	if (resumed) {
+		lines.splice(
+			1,
+			0,
+			`Resumed with ${session.history.length} messages in context and ${session.evidence.all().length} evidence entries.`,
+		);
+	}
+	return `${lines.join("\n")}\n`;
 }
 
 export async function runInteractive(options: InteractiveOptions): Promise<void> {
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
 	const groundingClient = new GroundingClient();
-	const evidence = new EvidenceLog();
-	const history: Message[] = [];
+	const state: ReplState = { session: options.session };
+	const print = (text: string) => process.stdout.write(`${text}\n`);
+	const ask = terminalAsker(
+		(q) => rl.question(q),
+		(t) => process.stdout.write(t),
+	);
+	const color = Boolean(process.stderr.isTTY) && !process.env.NO_COLOR;
+	const turn: TurnSettings = {
+		...options.turn,
+		permissions: createPolicy(options.permissions, options.yes, ask),
+	};
 
-	// Ctrl+C bypasses any try/finally further down, since Node kills the
-	// process before an in-flight await ever resolves or rejects.
 	const shutdown = () => {
 		groundingClient.close();
 		rl.close();
@@ -34,50 +57,46 @@ export async function runInteractive(options: InteractiveOptions): Promise<void>
 	};
 	process.on("SIGINT", shutdown);
 
-	console.log(`ledger (${options.providerName}/${options.model}). Ctrl+C to quit.\n`);
+	print(banner(state.session, options.resumed));
 
 	try {
-		let nextInput = options.initialMessage;
+		let next = options.initialMessage;
 		while (true) {
-			const input = nextInput ?? (await rl.question("> "));
-			nextInput = undefined;
+			let input: string;
+			if (next !== undefined) {
+				input = next;
+				next = undefined;
+			} else {
+				try {
+					input = await rl.question("> ");
+				} catch {
+					break;
+				}
+			}
 			if (!input.trim()) continue;
 
-			const userMessage: Message = { role: "user", content: input };
-			history.push(userMessage);
-			await appendMessage(options.sessionPath, userMessage);
-			const turnStart = history.length;
+			const command = await runCommandLine(input, { state, commands: BUILTIN_COMMANDS, print });
+			if (command.handled) {
+				if (command.exit) break;
+				continue;
+			}
 
-			for await (const event of runAgent({
-				providerName: options.providerName,
-				model: options.model,
-				system: options.system,
-				messages: history,
-				maxTurns: options.maxTurns,
-				groundingClient,
-				evidence,
-				claimsMode: options.claimsMode,
-				feedback: options.feedback,
-			})) {
-				if (event.type === "text_delta") process.stdout.write(event.delta);
-				if (event.type === "tool_start") consola.info(`\n[${event.name}] ${JSON.stringify(event.input)}`);
-				if (event.type === "tool_end" && event.isError)
-					consola.warn(`[${event.name}] failed: ${event.result}`);
-				if (event.type === "grounding_flag") consola.error(formatFlag(event.claim));
-				if (event.type === "agent_end") {
-					// event.messages is the whole conversation runAgent built from
-					// `history`, so only the tail past turnStart is new this round
-					// (the user message above was already recorded).
-					for (const m of event.messages.slice(turnStart)) await appendMessage(options.sessionPath, m);
-					history.length = 0;
-					history.push(...event.messages);
+			try {
+				const ledger = await runTurn(state.session, input, turn, groundingClient);
+				const summary = ledger ? formatLedger(ledger, color) : "";
+				if (summary) process.stderr.write(`\n\n${summary}`);
+				if (turn.validate === "strict" && ledger?.unverified) {
+					process.stderr.write(`\n${formatUnverified(ledger)}`);
 				}
+			} catch (err) {
+				process.stdout.write("\n");
+				consola.error(readableError(err));
 			}
 			process.stdout.write("\n\n");
 		}
 	} finally {
-		// covers stdin closing (Ctrl+D) - SIGINT is handled separately above
 		groundingClient.close();
+		rl.close();
 		process.removeListener("SIGINT", shutdown);
 	}
 }

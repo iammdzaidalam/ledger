@@ -17,7 +17,7 @@ export function checkerPath(): string {
 		: join(BIN_DIR, `grounding-checker-${process.platform}-${process.arch}${ext}`);
 }
 
-type CheckerProcess = ChildProcessByStdio<Writable, Readable, null>;
+type CheckerProcess = ChildProcessByStdio<Writable, Readable, Readable>;
 
 const failed = (request_id: string, error: string): CheckResponse => ({ request_id, claims: [], error });
 
@@ -29,8 +29,12 @@ export class GroundingClient {
 	private ensureStarted(): CheckerProcess {
 		if (this.child) return this.child;
 
-		const child = spawn(checkerPath(), [], { stdio: ["pipe", "pipe", "inherit"] });
+		const child = spawn(checkerPath(), [], { stdio: ["pipe", "pipe", "pipe"] });
 		const rl = createInterface({ input: child.stdout });
+		let stderrTail = "";
+		child.stderr.on("data", (d: Buffer) => {
+			stderrTail = (stderrTail + d.toString()).slice(-2000);
+		});
 
 		rl.on("line", (line) => {
 			const resolve = this.queue.shift();
@@ -52,7 +56,10 @@ export class GroundingClient {
 			consola.warn(`grounding checker unavailable: ${err.message}`);
 			reset(err.message);
 		});
-		child.on("exit", () => reset("checker subprocess exited"));
+		child.on("exit", () => {
+			const detail = stderrTail.trim().split("\n").at(-1);
+			reset(detail ? `checker subprocess exited: ${detail}` : "checker subprocess exited");
+		});
 		child.stdin.on("error", () => {});
 
 		this.child = child;

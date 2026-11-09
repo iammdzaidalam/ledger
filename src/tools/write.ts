@@ -7,6 +7,7 @@ import { outsideWorkspace } from "./workspace.js";
 
 export const writeTool: Tool = {
 	name: "Write",
+	evidence: { tool: "Write", args: (input) => ({ path: input.path }) },
 	description: "Create a file or overwrite it entirely. Makes parent directories as needed.",
 	inputSchema: {
 		type: "object",

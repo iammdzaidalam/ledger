@@ -58,3 +58,50 @@ Short running notes on what changed, what broke, what got fixed, and why.
 - `ledger-agent` was taken on npm. Package is `grounded-ledger`, command stays `ledger`.
 - First `npm pack` would have shipped the dev `bin/grounding-checker` (macOS only) and the client preferred it, so a Linux install would have tried to exec a Mach-O binary. `files` now lists only the per-platform binaries, and the client falls back to `grounding-checker-<platform>-<arch>`.
 - Verified by installing the packed tarball into a temp prefix: `ledger --version` runs without tsx, and the installed client finds and runs its darwin-arm64 checker.
+
+## Checker tuning on the dev split
+
+- Tuned only on the 7 dev scenarios. `eval/score.ts` loads every trace, held-out included, so the dev replay used a separate script that picks dev files by name before opening anything. I had already seen the held-out flags in `run1.md` while reviewing, so the held-out set is not fully untouched; that goes in the results when it is scored.
+- "The unit tests failed to pass" was flagged as a tests_pass lie. "failed to" was only checked before the match, and tagged claims skipped the failure-word check. Now "failed to", "unable to" and "prevent" count as negation inside the match, and tagged claims get the same check.
+- "...preventing the tests from running successfully" read as a success claim. Added a "prevent / stop / keep ... from X-ing" pattern. The four-word negation window also ran across commas, which swallowed "no failures, confirming the bug is fixed"; it now stops at clause punctuation.
+- "To fix the code and make it lint clean, I would need..." was a plan, not a claim. A sentence opening with "To <verb>" is a purpose clause up to its first comma. "To summarize, ..." still counts.
+- "src/sum.js has been written" found no path, because file claims only looked after the verb. Passive voice now looks before it, and a Write/Edit to the path wins over a later command that just mentions the file.
+- A small model "updated" greet.go three times with old_string equal to new_string and then said it was updated. Edit claims now need a non-empty diff.
+- "all 12 tests passed" was verified when 2 tests ran. A claimed count above the summary total is now contradicted (not for `go test`, which counts packages).
+- Net on dev: 4 false positives gone, one wrong reason fixed, all 5 correct flags kept, 4 missed lies now caught.
+
+## Validation loop (after reading murmur)
+
+- murmur runs an LLM validator per task and asks for up to 0-2 revisions by mode. Kept the loop shape, not the judge: verdicts still come from the deterministic checker.
+- `--feedback` was once per run, so a lie at turn 15 got nothing if turn 3 used it up. Now `--validate off|flag|revise|strict` with a budget per flagged turn and a cap per run.
+- The revised answer is not always the next turn: the honest fix for "tests pass" is to rerun the tests, so tool-only turns are waited through.
+- A repeated "Done, it worked." with no new command looked like a retraction, because the checker skips vague success with nothing fresh. The validator carries the original turn's fresh refs through the revision.
+- Unverifiable claims are never sent back. Pushing on them makes models retract true statements.
+- strict counts a checker failure as unverified. Auto-approving when the validator is down is the failure strict exists to catch.
+
+## Features taken from cogent
+
+- cogent has no license file, so nothing was copied. Permissions, git tools, session resume, readable provider errors, compaction and slash commands were written from scratch against Ledger's own evidence log.
+- A denied tool call is still recorded as evidence with `executed: false`, so "I ran it" after a denial is caught by `not_executed`.
+- The evidence log lives outside the message history, so compaction never drops it and resume replays it. A test checks that "I already ran the tests and they pass" after compaction is still contradicted by the old run.
+- The REPL used to save messages by slicing from the turn start, which breaks once compaction replaces history mid-run. Sessions now write compaction markers and rebuild with the same function on resume.
+- Git calls were first recorded as `Bash` so the checker's command rules would see them, which meant a commit message saying `make test` could pass as a test run. The checker now has a `Git` evidence kind that counts as a command for exit codes and mentions but never as a test, lint or build run.
+- The tool list grew from 7 to 15, about 1.5k more tokens of schema for small local models. Eval runs now pass `CORE_TOOLS` and build the system prompt from the same list, so they see exactly what run1 saw.
+
+## Merging parallel work
+
+- Two agents worked in separate worktrees that both touched `loop.ts`. The worktrees sat inside the repo, and Biome refused to run because it found their nested `biome.json` files. Merged each file three-way with `git merge-file` so nothing was staged, then removed the worktrees.
+- The cogent work moved print and REPL onto a shared `runTurn`, so the validation wiring (revision events, ledger summary, strict exit code) moved there instead of being patched into both modes.
+
+## Cancelling a turn
+
+- Ctrl+C only stopped the UI from listening. The Bash child kept running and the loop made another model call. An AbortSignal now goes through the loop, every provider, the tools and `runProcess`, which kills the child and records the call with `exit_code: null`.
+- After a cancel, the session history ended on the user's message, so the next turn sent two user messages in a row and the model never heard the turn was stopped. A cancelled turn now closes with a short assistant note.
+- The cancelled call's evidence reached the in-memory log but not the session file, because the turn returned before the killed process reported back. On resume, refs would have pointed at different calls. The turn now waits up to a second for that last event, and anything still unsaved is written when the turn closes.
+- The checker's stderr went straight to the terminal and drew over the TUI. It is captured now, and its last line shows up in the exit reason.
+- The permission splitter treated `;` and `>` inside quotes as separators, so `echo "a; rm x"` asked about `rm`. It now scans outside quotes only and gives up on an unterminated quote.
+
+## Website layout
+
+- The terminal panels sat at a fixed offset and ran off the frame's bottom-right edge. That cut the FALSE CLAIM line in half and hid the end of the Go code. They are now inset evenly and sized to the frame, with the code soft-wrapped on a hanging indent.
+- The replay was two screens tall and mostly empty. It is one screen now and scrolls to the newest step.

@@ -17,6 +17,12 @@ export interface RawExecution {
 
 export interface ToolExecMeta {
 	onExecution?: (exec: RawExecution) => void;
+	signal?: AbortSignal;
+}
+
+export interface EvidenceSpec {
+	tool: string;
+	args(input: Record<string, unknown>): Record<string, unknown>;
 }
 
 // Every tool implements this. inputSchema is what the model sees.
@@ -24,6 +30,8 @@ export interface Tool {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
+	readOnly?: boolean;
+	evidence?: EvidenceSpec;
 	execute(input: Record<string, unknown>, meta?: ToolExecMeta): Promise<ToolResult>;
 }
 

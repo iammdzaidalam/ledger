@@ -3,10 +3,17 @@ import { join } from "node:path";
 import type { ClaimsMode } from "../grounding/types.js";
 import { getToolDefinitions } from "../tools/index.js";
 
-const BASE_PROMPT = `You are Ledger, a terminal coding agent with access to a small set of tools
+const CORE_PROMPT = `You are Ledger, a terminal coding agent with access to a small set of tools
 (Read, Write, Edit, Bash, Grep, Find, Ls). Use them to inspect and modify the user's
 project. Only claim a command succeeded if the tool output actually shows it did -
 if a tool errors or times out, say so plainly instead of guessing at the outcome.`;
+
+const FULL_PROMPT = `You are Ledger, a terminal coding agent with access to a small set of tools
+(Read, Write, Edit, Bash, Grep, Find, Ls, and Git* tools for status, diffs, history, staging,
+commits and branches). Use them to inspect and modify the user's project. Only claim a command
+succeeded if the tool output actually shows it did - if a tool errors or times out, say so
+plainly instead of guessing at the outcome. The user may deny a tool call; a denied call did
+not run, so never report it as done.`;
 
 const TAGGED_CLAIMS_PROMPT = `Every tool result starts with a reference like [ref c3]. Whenever you
 report what a tool call did, wrap that statement in a claim tag naming the reference, for example:
@@ -26,12 +33,17 @@ async function readFirstExistingContextFile(): Promise<string | null> {
 	return null;
 }
 
-export async function buildSystemPrompt(extra?: string, claimsMode: ClaimsMode = "prose"): Promise<string> {
-	const tools = getToolDefinitions();
+export async function buildSystemPrompt(
+	extra?: string,
+	claimsMode: ClaimsMode = "prose",
+	only?: readonly string[],
+): Promise<string> {
+	const tools = getToolDefinitions(only);
 	const toolList = tools.map((t) => `- ${t.name}: ${t.description}`).join("\n");
 	const contextFile = await readFirstExistingContextFile();
 
-	const parts = [BASE_PROMPT, `Available tools:\n${toolList}`];
+	const hasGit = tools.some((t) => t.name.startsWith("Git"));
+	const parts = [hasGit ? FULL_PROMPT : CORE_PROMPT, `Available tools:\n${toolList}`];
 	if (claimsMode === "tagged") parts.push(TAGGED_CLAIMS_PROMPT);
 	if (contextFile) parts.push(`Project context:\n${contextFile}`);
 	if (extra) parts.push(extra);

@@ -8,6 +8,7 @@ import { GroundingClient } from "../src/grounding/client.js";
 import { EvidenceLog } from "../src/grounding/evidence.js";
 import type { ClaimsMode } from "../src/grounding/types.js";
 import { ollamaSettingsFromEnv } from "../src/providers/ollama.js";
+import { CORE_TOOLS } from "../src/tools/index.js";
 import { arg, list, loadScenarios, type Scenario, type SessionMeta, type TraceLine } from "./lib/trace.js";
 
 const root = resolve(import.meta.dirname, "..");
@@ -92,6 +93,7 @@ async function runSession(
 		num_ctx: numCtx,
 		num_predict: numPredict,
 		max_turns: maxTurns,
+		tools: [...CORE_TOOLS],
 		ledger_commit: commit,
 		started_at: new Date().toISOString(),
 	};
@@ -106,7 +108,7 @@ async function runSession(
 	process.env.LEDGER_WORKSPACE = workdir;
 	process.chdir(workdir);
 	try {
-		const system = await buildSystemPrompt(undefined, mode);
+		const system = await buildSystemPrompt(undefined, mode, CORE_TOOLS);
 		const pendingInputs = new Map<string, Record<string, unknown>>();
 		for await (const event of runAgent({
 			providerName: "ollama",
@@ -118,6 +120,7 @@ async function runSession(
 			groundingClient: client,
 			evidence,
 			claimsMode: mode,
+			tools: CORE_TOOLS,
 		})) {
 			if (event.type === "assistant_turn") {
 				turn = event.turn;

@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
 import type { ContentBlock, Message } from "../types.js";
+import { httpError } from "./errors.js";
 import type { CompletionOptions, Provider, StreamEvent } from "./types.js";
 
 interface OllamaToolCall {
@@ -85,6 +86,7 @@ export function createOllamaProvider(settings: OllamaSettings = ollamaSettingsFr
 		async *complete(options: CompletionOptions): AsyncGenerator<StreamEvent> {
 			const res = await fetch(`${settings.host}/api/chat`, {
 				method: "POST",
+				signal: options.signal,
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
 					model: options.model,
@@ -104,7 +106,7 @@ export function createOllamaProvider(settings: OllamaSettings = ollamaSettingsFr
 					},
 				}),
 			});
-			if (!res.ok || !res.body) throw new Error(`ollama: HTTP ${res.status} ${await res.text()}`);
+			if (!res.ok || !res.body) throw httpError(res.status, await res.text());
 
 			let callIndex = 0;
 			let sawToolCall = false;

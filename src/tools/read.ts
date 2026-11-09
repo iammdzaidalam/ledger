@@ -4,6 +4,7 @@ import { errorResult, okResult } from "./types.js";
 
 export const readTool: Tool = {
 	name: "Read",
+	readOnly: true,
 	description: "Read a file's contents. Returns text with line numbers, optionally offset/limited.",
 	inputSchema: {
 		type: "object",

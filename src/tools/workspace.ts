@@ -15,8 +15,12 @@ export function outsideWorkspace(path: string): boolean {
 
 export function shellCommand(command: string): { file: string; args: string[] } {
 	if (process.platform === "win32") return { file: "cmd.exe", args: ["/c", command] };
+	return sandboxed("/bin/sh", ["-c", command]);
+}
+
+export function sandboxed(file: string, args: string[]): { file: string; args: string[] } {
 	const root = workspaceRoot();
-	if (!root || process.platform !== "darwin") return { file: "/bin/sh", args: ["-c", command] };
+	if (!root || process.platform !== "darwin") return { file, args };
 
 	const writable = [
 		root,
@@ -33,5 +37,5 @@ export function shellCommand(command: string): { file: string; args: string[] } 
 		"(deny file-write*)",
 		`(allow file-write* ${writable.map((p) => `(subpath ${JSON.stringify(p)})`).join(" ")})`,
 	].join("\n");
-	return { file: "/usr/bin/sandbox-exec", args: ["-p", profile, "/bin/sh", "-c", command] };
+	return { file: "/usr/bin/sandbox-exec", args: ["-p", profile, file, ...args] };
 }

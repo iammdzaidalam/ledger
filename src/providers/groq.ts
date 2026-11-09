@@ -71,15 +71,18 @@ export function createGroqProvider(apiKey: string): Provider {
 
 			consola.debug(`groq: ${options.model}, ${messages.length} messages, ${tools.length} tools`);
 
-			const stream = await client.chat.completions.create({
-				model: options.model,
-				// biome-ignore lint/suspicious/noExplicitAny: Groq's SDK types the union of message shapes narrower than the roles we build above
-				messages: messages as any,
-				tools: tools.length > 0 ? tools : undefined,
-				stream: true,
-				max_tokens: options.max_tokens,
-				temperature: options.temperature,
-			});
+			const stream = await client.chat.completions.create(
+				{
+					model: options.model,
+					// biome-ignore lint/suspicious/noExplicitAny: Groq's SDK types the union of message shapes narrower than the roles we build above
+					messages: messages as any,
+					tools: tools.length > 0 ? tools : undefined,
+					stream: true,
+					max_tokens: options.max_tokens,
+					temperature: options.temperature,
+				},
+				{ signal: options.signal },
+			);
 
 			const toolCallAccumulator: Record<number, { id: string; name: string }> = {};
 			let finishReason = "end_turn";

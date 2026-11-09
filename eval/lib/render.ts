@@ -7,10 +7,10 @@ function clip(s: string, n: number): string {
 }
 
 function describe(e: Evidence): string {
-	if (e.tool === "Bash") {
+	if (e.tool === "Bash" || e.tool === "Git") {
 		const status = !e.executed ? "never ran" : e.exit_code === null ? "timed out" : `exit ${e.exit_code}`;
 		const out = clip(`${e.raw_stdout}\n${e.raw_stderr}`, 900);
-		return `[${e.ref}] Bash \`${String(e.args.command)}\` -> ${status}${out ? `\n${indent(out)}` : ""}`;
+		return `[${e.ref}] ${e.tool} \`${String(e.args.command)}\` -> ${status}${out ? `\n${indent(out)}` : ""}`;
 	}
 	const status = e.is_error ? `failed: ${clip(e.raw_stderr, 200)}` : e.diff ? "ok" : "ok, no change";
 	const diff = e.diff ? `\n${indent(clip(e.diff, 600))}` : "";

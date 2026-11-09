@@ -1,18 +1,86 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HELP_TEXT, parseArgs } from "./cli/args.js";
+import { HELP_TEXT, type ParsedArgs, parseArgs } from "./cli/args.js";
 import { loadSettings } from "./config/settings.js";
 import { buildSystemPrompt } from "./config/system-prompt.js";
+import type { Settings } from "./config/types.js";
+import { isValidationMode, type ValidationMode } from "./grounding/validation.js";
 import { runInteractive } from "./modes/interactive.js";
 import { runPrint } from "./modes/print.js";
-import { defaultModelFor, MODELS } from "./providers/index.js";
-import { defaultSessionId } from "./session/store.js";
+import { defaultModelFor, isKnownModel, PROVIDERS } from "./providers/index.js";
+import { ActiveSession } from "./session/active.js";
+import {
+	defaultSessionId,
+	formatSessionList,
+	latestSessionId,
+	listSessions,
+	loadSession,
+	resolveSessionId,
+} from "./session/store.js";
+import type { SessionData } from "./session/types.js";
 
 async function readStdin(): Promise<string> {
 	if (process.stdin.isTTY) return "";
 	const chunks: Buffer[] = [];
 	for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
 	return Buffer.concat(chunks).toString("utf-8").trim();
+}
+
+async function savedSession(args: ParsedArgs): Promise<SessionData | null> {
+	if (args.resume) return loadSession(await resolveSessionId(args.resume));
+	if (args.continue) {
+		const id = await latestSessionId();
+		if (!id) throw new Error("No saved sessions to continue in .ledger/sessions.");
+		return loadSession(id);
+	}
+	if (args.session) {
+		const data = await loadSession(args.session);
+		return data && (data.messageCount > 0 || data.evidence.length > 0) ? data : null;
+	}
+	return null;
+}
+
+function pickModel(
+	args: ParsedArgs,
+	settings: Settings,
+	saved: SessionData | null,
+): { provider: string; model: string } {
+	const provider = args.provider ?? saved?.provider ?? settings.provider ?? "claude";
+	if (!(PROVIDERS as readonly string[]).includes(provider)) throw new Error(`Unknown provider: ${provider}`);
+	const fromSaved = saved?.provider === provider ? saved.model : undefined;
+	const fromSettings = !settings.provider || settings.provider === provider ? settings.model : undefined;
+	const model = args.model ?? fromSaved ?? fromSettings ?? defaultModelFor(provider);
+	if (!isKnownModel(provider, model)) {
+		throw new Error(`Unknown model for ${provider}: ${model}. Run ledger and type /model to list them.`);
+	}
+	return { provider, model };
+}
+
+function pickValidation(args: ParsedArgs, settings: Settings) {
+	const validate: unknown =
+		args.validate ??
+		(args.feedback ? "revise" : undefined) ??
+		settings.validate ??
+		(settings.feedback === true ? "revise" : "flag");
+	if (!isValidationMode(validate)) throw new Error(`Unknown validate mode: ${validate}`);
+	const maxRevisions = args.maxRevisions === undefined ? settings.maxRevisions : Number(args.maxRevisions);
+	if (maxRevisions !== undefined && !(Number.isInteger(maxRevisions) && maxRevisions >= 0)) {
+		throw new Error(`--max-revisions must be a whole number, got: ${args.maxRevisions ?? maxRevisions}`);
+	}
+	return {
+		validate: validate as ValidationMode,
+		maxRevisions,
+		maxRevisionsPerRun: settings.maxRevisionsPerRun,
+	};
+}
+
+export function shouldUseTui(
+	args: Pick<ParsedArgs, "noTui">,
+	settings: Pick<Settings, "tui">,
+	stdinTTY = process.stdin.isTTY === true,
+	stdoutTTY = process.stdout.isTTY === true,
+): boolean {
+	return !args.noTui && settings.tui !== false && stdinTTY && stdoutTTY;
 }
 
 export async function main(): Promise<void> {
@@ -29,53 +97,62 @@ export async function main(): Promise<void> {
 		return;
 	}
 
-	const settings = await loadSettings();
-	const provider = args.provider ?? settings.provider ?? "claude";
-	const model = args.model ?? settings.model ?? defaultModelFor(provider);
+	if (args.listSessions) {
+		console.log(formatSessionList(await listSessions()));
+		return;
+	}
 
+	const settings = await loadSettings();
 	const claimsMode = args.claims ?? settings.claimsMode ?? "prose";
-	const feedback = args.feedback || settings.feedback === true;
+	const validation = pickValidation(args, settings);
 
 	if (claimsMode !== "prose" && claimsMode !== "tagged") {
-		console.error(`Unknown claims mode: ${claimsMode}`);
-		process.exit(1);
+		throw new Error(`Unknown claims mode: ${claimsMode}`);
 	}
 
-	if (provider !== "ollama" && !MODELS.some((m) => m.id === model)) {
-		console.error(`Unknown model: ${model}`);
-		process.exit(1);
-	}
+	const saved = await savedSession(args);
+	const { provider, model } = pickModel(args, settings, saved);
+	const session = saved
+		? ActiveSession.fromData(saved, provider, model)
+		: ActiveSession.create(args.session ?? defaultSessionId(), provider, model);
 
 	const system = await buildSystemPrompt(settings.systemPromptExtra, claimsMode);
 	const stdinMessage = await readStdin();
 	const message = args.message ?? stdinMessage;
-	const sessionPath = join(".ledger", "sessions", `${args.session ?? defaultSessionId()}.jsonl`);
+	const turn = {
+		system,
+		maxTurns: settings.maxTurns,
+		claimsMode,
+		...validation,
+		contextLimit: settings.contextLimit,
+		autoCompact: settings.autoCompact,
+	} as const;
 
 	if (args.print || stdinMessage) {
-		if (!message) {
-			console.error("No message given for print mode.");
-			process.exit(1);
-		}
-		await runPrint({
-			providerName: provider,
-			model,
-			system,
+		if (!message) throw new Error("No message given for print mode.");
+		process.exitCode = await runPrint({
+			session,
+			turn,
+			permissions: settings.permissions,
+			yes: args.yes,
 			message,
-			maxTurns: settings.maxTurns,
-			claimsMode,
-			feedback,
-			sessionPath,
+			canPrompt: process.stdin.isTTY === true,
 		});
-	} else {
-		await runInteractive({
-			providerName: provider,
-			model,
-			system,
-			initialMessage: message,
-			maxTurns: settings.maxTurns,
-			claimsMode,
-			feedback,
-			sessionPath,
-		});
+		return;
 	}
+
+	const interactive = {
+		session,
+		turn,
+		permissions: settings.permissions,
+		yes: args.yes,
+		initialMessage: message || undefined,
+		resumed: saved !== null,
+	};
+	if (shouldUseTui(args, settings)) {
+		const { runTui } = await import("./tui/run.js");
+		await runTui(interactive);
+		return;
+	}
+	await runInteractive(interactive);
 }

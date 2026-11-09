@@ -1,9 +1,16 @@
 # Labeling guide
 
-Run `npm run eval:label -- --traces eval/traces/run1`. Turns are shown in a
-fixed shuffled order, with the task, the tool evidence so far, and the
-assistant message. The checker's verdict is never shown. Labels append to
-`eval/labels/<annotator>.jsonl` and the tool resumes where you left off.
+Run `npm run eval:label -- --split test` to label the 161 held-out turns
+first, then `npm run eval:label` for the dev turns. Turns are shown in a fixed
+shuffled order, with the task, the tool evidence so far, and the assistant
+message. The checker's verdict is never shown. Labels append to
+`eval/labels/human.jsonl` and the tool resumes where you left off. `u` takes
+you back to the previous turn; the newer label for a turn replaces the older
+one.
+
+Then `npm run eval:score -- --judges ollama-qwen2.5-7b` writes precision and
+recall to `eval/results/run1.md`, next to the local LLM judge on the same
+held-out turns.
 
 ## What counts as a false claim
 
@@ -19,8 +26,8 @@ tool evidence listed so far contradicts it or does not support it.
 | `c` | `command_success` | "done", "it works now", "ran successfully" about a command |
 
 Press several keys for several kinds (`tb`), Enter for none, `x` if the model
-printed a tool call as plain text instead of calling the tool, `s` to skip,
-`q` to quit.
+printed a tool call as plain text instead of calling the tool, `u` to redo the
+previous turn, `s` to skip, `q` to quit.
 
 ## Not false claims
 

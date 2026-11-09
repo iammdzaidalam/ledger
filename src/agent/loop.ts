@@ -1,13 +1,15 @@
-import { feedbackFor, isFlag } from "../grounding/format.js";
-import type { ClaimResult } from "../grounding/types.js";
+import { isFlag } from "../grounding/format.js";
+import type { CheckResponse } from "../grounding/types.js";
+import { Validator, validationPolicy } from "../grounding/validation.js";
+import { checkPermission, deniedCall } from "../permissions/gate.js";
 import { createProvider } from "../providers/index.js";
 import { getTool, getToolDefinitions } from "../tools/index.js";
 import type { RawExecution, ToolResult } from "../tools/types.js";
 import type { ContentBlock, Message, ToolResultBlock } from "../types.js";
+import { autoCompact } from "./compaction.js";
 import type { AgentEvent, AgentOptions } from "./types.js";
 
 const DEFAULT_MAX_TURNS = 20;
-const EVIDENCE_TOOLS = new Set(["Bash", "Write", "Edit"]);
 
 function textOf(blocks: ContentBlock[]): string {
 	return blocks
@@ -21,17 +23,27 @@ function textOf(blocks: ContentBlock[]): string {
 // feed the results back in as a new turn, repeat until it stops calling tools.
 export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEvent> {
 	const provider = options.provider ?? createProvider(options.providerName, getApiKey(options.providerName));
-	const tools = getToolDefinitions();
+	const tools = getToolDefinitions(options.tools);
 	const messages: Message[] = [...options.messages];
 	const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
 	const tagged = options.claimsMode === "tagged";
-	let feedbackSent = false;
+	const validator = new Validator(validationPolicy(options));
 
 	yield { type: "agent_start" };
 
 	for (let turn = 1; turn <= maxTurns; turn++) {
+		if (options.signal?.aborted) break;
 		const assistantBlocks: ContentBlock[] = [];
 		const pendingToolCalls: Record<string, { name: string; inputJson: string }> = {};
+
+		if (options.compaction) {
+			const context = { provider, model: options.model, system: options.system, tools };
+			const compaction = await autoCompact(messages, context, options.compaction);
+			if (compaction) {
+				messages.splice(0, messages.length, ...compaction.messages);
+				yield { type: "compaction", compaction };
+			}
+		}
 
 		for await (const event of provider.complete({
 			model: options.model,
@@ -40,6 +52,7 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 			tools,
 			max_tokens: 8192,
 			temperature: options.temperature,
+			signal: options.signal,
 		})) {
 			if (event.type === "text_delta") {
 				yield { type: "text_delta", delta: event.delta };
@@ -79,13 +92,13 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 		const toolCalls = assistantBlocks.filter((b) => b.type === "tool_use");
 		yield { type: "assistant_turn", turn, text, toolCalls: toolCalls.length };
 
-		let flags: ClaimResult[] = [];
-		if (text) {
+		let response: CheckResponse | null = null;
+		if (text && validator.checks) {
 			const startedAt = performance.now();
-			const response = await options.groundingClient.check({
+			response = await options.groundingClient.check({
 				turn_text: text,
 				evidence: options.evidence.all(),
-				fresh_refs: options.evidence.takeFresh(),
+				fresh_refs: validator.freshRefs(options.evidence.takeFresh()),
 			});
 			yield {
 				type: "grounding_check",
@@ -94,14 +107,15 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 				error: response.error,
 				latencyMs: performance.now() - startedAt,
 			};
-			flags = response.claims.filter(isFlag);
-			for (const claim of flags) yield { type: "grounding_flag", claim };
+			for (const claim of response.claims.filter(isFlag)) yield { type: "grounding_flag", claim };
 		}
-		const feedback = options.feedback && flags.length > 0 ? feedbackFor(flags) : null;
+		const review = validator.review(turn, response, toolCalls.length);
+		if (review.result) yield { type: "grounding_revision_result", ...review.result };
+		if (review.request) yield { type: "grounding_revision_requested", ...review.request };
+		const feedback = review.feedback;
 
 		if (toolCalls.length === 0) {
-			if (!feedback || feedbackSent) break;
-			feedbackSent = true;
+			if (!feedback) break;
 			messages.push({ role: "user", content: feedback });
 			continue;
 		}
@@ -112,17 +126,21 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 			if (toolCall.type !== "tool_use") continue;
 			yield { type: "tool_start", id: toolCall.id, name: toolCall.name, input: toolCall.input };
 
-			const tool = getTool(toolCall.name);
+			const tool = getTool(toolCall.name, options.tools);
 			let execution: RawExecution | undefined;
 			let result: ToolResult;
+			const permission = tool ? await checkPermission(options.permissions, tool, toolCall.input) : null;
 			if (!tool) {
 				result = { output: `Unknown tool: ${toolCall.name}`, isError: true };
+			} else if (permission && !permission.allow) {
+				({ result, execution } = deniedCall(tool, toolCall.input, permission.reason));
 			} else {
 				result = await tool
 					.execute(toolCall.input, {
 						onExecution: (exec) => {
 							execution = exec;
 						},
+						signal: options.signal,
 					})
 					.catch((err) => ({
 						output: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
@@ -131,9 +149,9 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 			}
 
 			let output = result.output;
-			if (execution && EVIDENCE_TOOLS.has(toolCall.name)) {
-				const entry = options.evidence.record(toolCall.name, execution);
-				yield { type: "evidence", entry };
+			if (execution && tool?.evidence) {
+				const entry = options.evidence.record(tool.evidence.tool, execution);
+				yield { type: "evidence", entry, toolUseId: toolCall.id };
 				if (tagged) output = `[ref ${entry.ref}]\n${output}`;
 			}
 
@@ -158,7 +176,9 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 		messages.push({ role: "user", content: toolResultBlocks });
 	}
 
-	yield { type: "agent_end", messages };
+	const final = validator.finish();
+	if (final.result) yield { type: "grounding_revision_result", ...final.result };
+	yield { type: "agent_end", messages, ledger: final.ledger };
 }
 
 function parseInput(json: string): Record<string, unknown> {

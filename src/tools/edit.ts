@@ -29,6 +29,7 @@ async function applyEdit(input: Record<string, unknown>): Promise<{ result: Tool
 
 export const editTool: Tool = {
 	name: "Edit",
+	evidence: { tool: "Edit", args: (input) => ({ path: input.path }) },
 	description:
 		"Replace an exact, unique string in a file with another string. Fails if old_string " +
 		"isn't found or matches more than once, unique matches are the whole point.",
