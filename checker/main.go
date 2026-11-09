@@ -9,7 +9,7 @@ import (
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
 
@@ -18,31 +18,18 @@ func main() {
 		if len(line) == 0 {
 			continue
 		}
-
 		var req CheckRequest
+		var resp CheckResponse
 		if err := json.Unmarshal(line, &req); err != nil {
-			// one bad line shouldn't kill a process the TS side depends on staying alive
-			writeUnverifiable(writer, err)
-			continue
+			resp = CheckResponse{Claims: []ClaimResult{}, Error: err.Error()}
+		} else {
+			resp = Evaluate(req)
 		}
-
-		result := toVerifiedResult(req, Evaluate(req))
-		encoded, err := json.Marshal(result)
+		encoded, err := json.Marshal(resp)
 		if err != nil {
-			writeUnverifiable(writer, err)
-			continue
+			encoded, _ = json.Marshal(CheckResponse{RequestID: req.RequestID, Claims: []ClaimResult{}, Error: err.Error()})
 		}
 		fmt.Fprintln(writer, string(encoded))
 		writer.Flush()
 	}
-}
-
-func writeUnverifiable(writer *bufio.Writer, cause error) {
-	note := cause.Error()
-	result := VerifiedResult{
-		ClaimCheck: ClaimCheck{ModelClaimed: &note, MatchesEvidence: "unverifiable"},
-	}
-	encoded, _ := json.Marshal(result)
-	fmt.Fprintln(writer, string(encoded))
-	writer.Flush()
 }
