@@ -1,7 +1,9 @@
 import { consola } from "consola";
 import { runAgent } from "../agent/loop.js";
 import { GroundingClient } from "../grounding/client.js";
+import { EvidenceLog } from "../grounding/evidence.js";
 import { formatFlag } from "../grounding/format.js";
+import type { ClaimsMode } from "../grounding/types.js";
 import { appendMessage } from "../session/store.js";
 import type { Message } from "../types.js";
 
@@ -11,6 +13,8 @@ export interface PrintOptions {
 	system: string;
 	message: string;
 	maxTurns?: number;
+	claimsMode?: ClaimsMode;
+	feedback?: boolean;
 	sessionPath?: string;
 }
 
@@ -19,6 +23,7 @@ export async function runPrint(options: PrintOptions): Promise<void> {
 	if (options.sessionPath) await appendMessage(options.sessionPath, userMessage);
 
 	const groundingClient = new GroundingClient();
+	const evidence = new EvidenceLog();
 
 	try {
 		for await (const event of runAgent({
@@ -28,14 +33,16 @@ export async function runPrint(options: PrintOptions): Promise<void> {
 			messages: [userMessage],
 			maxTurns: options.maxTurns,
 			groundingClient,
+			evidence,
+			claimsMode: options.claimsMode,
+			feedback: options.feedback,
 		})) {
 			if (event.type === "text_delta") process.stdout.write(event.delta);
 			if (event.type === "tool_start") consola.info(`\n[${event.name}] ${JSON.stringify(event.input)}`);
 			if (event.type === "tool_end" && event.isError) consola.warn(`[${event.name}] failed: ${event.result}`);
-			if (event.type === "grounding_flag") consola.error(formatFlag(event.result));
+			if (event.type === "grounding_flag") consola.error(formatFlag(event.claim));
 			if (event.type === "agent_end" && options.sessionPath) {
-				const last = event.messages.at(-1);
-				if (last) await appendMessage(options.sessionPath, last);
+				for (const m of event.messages.slice(1)) await appendMessage(options.sessionPath, m);
 			}
 		}
 	} finally {

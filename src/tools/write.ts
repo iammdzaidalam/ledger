@@ -1,7 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Tool } from "./types.js";
-import { errorResult, okResult } from "./types.js";
+import { unifiedDiff } from "./diff.js";
+import type { Tool, ToolResult } from "./types.js";
+import { errorResult, fileExecution, okResult } from "./types.js";
+import { outsideWorkspace } from "./workspace.js";
 
 export const writeTool: Tool = {
 	name: "Write",
@@ -15,15 +17,23 @@ export const writeTool: Tool = {
 		required: ["path", "content"],
 	},
 
-	async execute(input): Promise<ReturnType<typeof okResult>> {
+	async execute(input, meta): Promise<ToolResult> {
+		const startedAt = Date.now();
+		let diff = "";
+		let result: ToolResult;
 		try {
 			const path = input.path as string;
 			const content = input.content as string;
+			if (outsideWorkspace(path)) throw new Error(`${path} is outside the workspace`);
+			const before = await readFile(path, "utf-8").catch(() => "");
 			await mkdir(dirname(path), { recursive: true });
 			await writeFile(path, content, "utf-8");
-			return okResult(`Wrote ${content.length} bytes to ${path}`);
+			diff = unifiedDiff(path, before, content);
+			result = okResult(`Wrote ${content.length} bytes to ${path}`);
 		} catch (err) {
-			return errorResult(err);
+			result = errorResult(err);
 		}
+		meta?.onExecution?.(fileExecution(input, startedAt, result, diff));
+		return result;
 	},
 };

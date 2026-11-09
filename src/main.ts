@@ -6,6 +6,7 @@ import { buildSystemPrompt } from "./config/system-prompt.js";
 import { runInteractive } from "./modes/interactive.js";
 import { runPrint } from "./modes/print.js";
 import { defaultModelFor, MODELS } from "./providers/index.js";
+import { defaultSessionId } from "./session/store.js";
 
 async function readStdin(): Promise<string> {
 	if (process.stdin.isTTY) return "";
@@ -32,21 +33,39 @@ export async function main(): Promise<void> {
 	const provider = args.provider ?? settings.provider ?? "claude";
 	const model = args.model ?? settings.model ?? defaultModelFor(provider);
 
-	if (!MODELS.some((m) => m.id === model)) {
+	const claimsMode = args.claims ?? settings.claimsMode ?? "prose";
+	const feedback = args.feedback || settings.feedback === true;
+
+	if (claimsMode !== "prose" && claimsMode !== "tagged") {
+		console.error(`Unknown claims mode: ${claimsMode}`);
+		process.exit(1);
+	}
+
+	if (provider !== "ollama" && !MODELS.some((m) => m.id === model)) {
 		console.error(`Unknown model: ${model}`);
 		process.exit(1);
 	}
 
-	const system = await buildSystemPrompt(settings.systemPromptExtra);
+	const system = await buildSystemPrompt(settings.systemPromptExtra, claimsMode);
 	const stdinMessage = await readStdin();
 	const message = args.message ?? stdinMessage;
+	const sessionPath = join(".ledger", "sessions", `${args.session ?? defaultSessionId()}.jsonl`);
 
 	if (args.print || stdinMessage) {
 		if (!message) {
 			console.error("No message given for print mode.");
 			process.exit(1);
 		}
-		await runPrint({ providerName: provider, model, system, message, maxTurns: settings.maxTurns });
+		await runPrint({
+			providerName: provider,
+			model,
+			system,
+			message,
+			maxTurns: settings.maxTurns,
+			claimsMode,
+			feedback,
+			sessionPath,
+		});
 	} else {
 		await runInteractive({
 			providerName: provider,
@@ -54,6 +73,9 @@ export async function main(): Promise<void> {
 			system,
 			initialMessage: message,
 			maxTurns: settings.maxTurns,
+			claimsMode,
+			feedback,
+			sessionPath,
 		});
 	}
 }

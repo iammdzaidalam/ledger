@@ -4,15 +4,15 @@ export interface ToolResult {
 	isError: boolean;
 }
 
-// Raw execution evidence a tool can hand off for grounding, on the side, without
-// changing what it returns to the model. Only bash.ts populates this today.
 export interface RawExecution {
 	args: Record<string, unknown>;
 	raw_stdout: string;
 	raw_stderr: string;
 	exit_code: number | null;
 	executed: boolean;
+	is_error: boolean;
 	duration_ms: number;
+	diff?: string;
 }
 
 export interface ToolExecMeta {
@@ -34,4 +34,22 @@ export function errorResult(err: unknown): ToolResult {
 
 export function okResult(output: string): ToolResult {
 	return { output, isError: false };
+}
+
+export function fileExecution(
+	input: Record<string, unknown>,
+	startedAt: number,
+	result: ToolResult,
+	diff = "",
+): RawExecution {
+	return {
+		args: { path: input.path },
+		raw_stdout: result.isError ? "" : result.output,
+		raw_stderr: result.isError ? result.output : "",
+		exit_code: null,
+		executed: true,
+		is_error: result.isError,
+		duration_ms: Date.now() - startedAt,
+		diff,
+	};
 }

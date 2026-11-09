@@ -1,30 +1,35 @@
-import { extractClaimText } from "../grounding/claim-extractor.js";
+import { feedbackFor, isFlag } from "../grounding/format.js";
+import type { ClaimResult } from "../grounding/types.js";
 import { createProvider } from "../providers/index.js";
 import { getTool, getToolDefinitions } from "../tools/index.js";
-import type { RawExecution } from "../tools/types.js";
-import type { ContentBlock, Message, ToolResultBlock, ToolUseBlock } from "../types.js";
+import type { RawExecution, ToolResult } from "../tools/types.js";
+import type { ContentBlock, Message, ToolResultBlock } from "../types.js";
 import type { AgentEvent, AgentOptions } from "./types.js";
 
 const DEFAULT_MAX_TURNS = 20;
+const EVIDENCE_TOOLS = new Set(["Bash", "Write", "Edit"]);
+
+function textOf(blocks: ContentBlock[]): string {
+	return blocks
+		.filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+		.map((b) => b.text)
+		.join("")
+		.trim();
+}
 
 // Core loop: stream a completion, run whatever tools the model asked for,
 // feed the results back in as a new turn, repeat until it stops calling tools.
 export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEvent> {
-	const provider = createProvider(options.providerName, getApiKey(options.providerName));
+	const provider = options.provider ?? createProvider(options.providerName, getApiKey(options.providerName));
 	const tools = getToolDefinitions();
 	const messages: Message[] = [...options.messages];
-	let turns = 0;
 	const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
-
-	// bash results awaiting a claim to check against, since the claim always
-	// shows up in the model's *next* text turn, so this can't be checked inline.
-	const grounding = options.groundingClient;
-	const pendingBashResults = new Map<string, RawExecution>();
+	const tagged = options.claimsMode === "tagged";
+	let feedbackSent = false;
 
 	yield { type: "agent_start" };
 
-	while (turns < maxTurns) {
-		turns++;
+	for (let turn = 1; turn <= maxTurns; turn++) {
 		const assistantBlocks: ContentBlock[] = [];
 		const pendingToolCalls: Record<string, { name: string; inputJson: string }> = {};
 
@@ -34,6 +39,7 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 			messages,
 			tools,
 			max_tokens: 8192,
+			temperature: options.temperature,
 		})) {
 			if (event.type === "text_delta") {
 				yield { type: "text_delta", delta: event.delta };
@@ -54,8 +60,12 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 			if (event.type === "tool_use_end") {
 				const tc = pendingToolCalls[event.id];
 				if (!tc) continue;
-				const parsedInput = JSON.parse(tc.inputJson || "{}");
-				assistantBlocks.push({ type: "tool_use", id: event.id, name: tc.name, input: parsedInput });
+				assistantBlocks.push({
+					type: "tool_use",
+					id: event.id,
+					name: tc.name,
+					input: parseInput(tc.inputJson),
+				});
 			}
 
 			if (event.type === "message_end") {
@@ -65,46 +75,66 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 
 		messages.push({ role: "assistant", content: assistantBlocks });
 
-		// This turn's text is the model's claim about whatever bash calls are
-		// still pending from the previous round, so check it before doing anything else.
-		if (pendingBashResults.size > 0) {
-			const claimed = extractClaimText(assistantBlocks);
-			for (const exec of pendingBashResults.values()) {
-				const verified = await grounding.check({ tool: "Bash", ...exec, model_claimed: claimed });
-				if (verified.claim_check.matches_evidence !== true) {
-					yield { type: "grounding_flag", result: verified };
-				}
-			}
-			pendingBashResults.clear();
-		}
+		const text = textOf(assistantBlocks);
+		const toolCalls = assistantBlocks.filter((b) => b.type === "tool_use");
+		yield { type: "assistant_turn", turn, text, toolCalls: toolCalls.length };
 
-		// Decide continuation by what blocks actually came back, not the stop
-		// reason, since that keeps one rule true across every provider, even
-		// ones (like Gemini) whose reported stop reason can't be trusted.
-		const hasToolCalls = assistantBlocks.some((b) => b.type === "tool_use");
-		if (!hasToolCalls) break;
+		let flags: ClaimResult[] = [];
+		if (text) {
+			const startedAt = performance.now();
+			const response = await options.groundingClient.check({
+				turn_text: text,
+				evidence: options.evidence.all(),
+				fresh_refs: options.evidence.takeFresh(),
+			});
+			yield {
+				type: "grounding_check",
+				turn,
+				claims: response.claims,
+				error: response.error,
+				latencyMs: performance.now() - startedAt,
+			};
+			flags = response.claims.filter(isFlag);
+			for (const claim of flags) yield { type: "grounding_flag", claim };
+		}
+		const feedback = options.feedback && flags.length > 0 ? feedbackFor(flags) : null;
+
+		if (toolCalls.length === 0) {
+			if (!feedback || feedbackSent) break;
+			feedbackSent = true;
+			messages.push({ role: "user", content: feedback });
+			continue;
+		}
 
 		const toolResultBlocks: ToolResultBlock[] = [];
 
-		for (const block of assistantBlocks) {
-			if (block.type !== "tool_use") continue;
-			const toolCall = block as ToolUseBlock;
-
+		for (const toolCall of toolCalls) {
+			if (toolCall.type !== "tool_use") continue;
 			yield { type: "tool_start", id: toolCall.id, name: toolCall.name, input: toolCall.input };
 
 			const tool = getTool(toolCall.name);
-			let result: { output: string; isError: boolean };
+			let execution: RawExecution | undefined;
+			let result: ToolResult;
 			if (!tool) {
 				result = { output: `Unknown tool: ${toolCall.name}`, isError: true };
 			} else {
-				const meta =
-					toolCall.name === "Bash"
-						? { onExecution: (exec: RawExecution) => pendingBashResults.set(toolCall.id, exec) }
-						: undefined;
-				result = await tool.execute(toolCall.input, meta).catch((err) => ({
-					output: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
-					isError: true,
-				}));
+				result = await tool
+					.execute(toolCall.input, {
+						onExecution: (exec) => {
+							execution = exec;
+						},
+					})
+					.catch((err) => ({
+						output: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+						isError: true,
+					}));
+			}
+
+			let output = result.output;
+			if (execution && EVIDENCE_TOOLS.has(toolCall.name)) {
+				const entry = options.evidence.record(toolCall.name, execution);
+				yield { type: "evidence", entry };
+				if (tagged) output = `[ref ${entry.ref}]\n${output}`;
 			}
 
 			yield {
@@ -118,18 +148,30 @@ export async function* runAgent(options: AgentOptions): AsyncGenerator<AgentEven
 			toolResultBlocks.push({
 				type: "tool_result",
 				tool_use_id: toolCall.id,
-				content: result.output,
+				content: output,
 				is_error: result.isError,
 			});
 		}
 
+		const lastResult = toolResultBlocks.at(-1);
+		if (feedback && lastResult) lastResult.content += `\n\n${feedback}`;
 		messages.push({ role: "user", content: toolResultBlocks });
 	}
 
 	yield { type: "agent_end", messages };
 }
 
+function parseInput(json: string): Record<string, unknown> {
+	try {
+		const parsed = JSON.parse(json || "{}");
+		return parsed && typeof parsed === "object" ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
 export function getApiKey(providerName: string): string {
+	if (providerName === "ollama") return "";
 	const envKey =
 		providerName === "claude"
 			? "ANTHROPIC_API_KEY"

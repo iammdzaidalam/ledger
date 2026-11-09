@@ -1,59 +1,81 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { consola } from "consola";
-import type { CheckRequest, VerifiedResult } from "./types.js";
+import type { CheckRequest, CheckResponse } from "./types.js";
 
-const CHECKER_PATH = join(import.meta.dirname, "..", "..", "bin", "grounding-checker");
+const BIN_DIR = join(import.meta.dirname, "..", "..", "bin");
+
+export function checkerPath(): string {
+	if (process.env.LEDGER_CHECKER_PATH) return process.env.LEDGER_CHECKER_PATH;
+	const ext = process.platform === "win32" ? ".exe" : "";
+	const local = join(BIN_DIR, `grounding-checker${ext}`);
+	return existsSync(local)
+		? local
+		: join(BIN_DIR, `grounding-checker-${process.platform}-${process.arch}${ext}`);
+}
 
 type CheckerProcess = ChildProcessByStdio<Writable, Readable, null>;
 
+const failed = (request_id: string, error: string): CheckResponse => ({ request_id, claims: [], error });
+
 export class GroundingClient {
 	private child: CheckerProcess | null = null;
-	private queue: Array<(result: VerifiedResult) => void> = [];
+	private queue: Array<(result: CheckResponse) => void> = [];
 	private nextId = 0;
 
 	private ensureStarted(): CheckerProcess {
 		if (this.child) return this.child;
 
-		const child = spawn(CHECKER_PATH, [], { stdio: ["pipe", "pipe", "inherit"] });
+		const child = spawn(checkerPath(), [], { stdio: ["pipe", "pipe", "inherit"] });
 		const rl = createInterface({ input: child.stdout });
+
 		rl.on("line", (line) => {
 			const resolve = this.queue.shift();
-			if (resolve) resolve(JSON.parse(line) as VerifiedResult);
+			if (!resolve) return;
+			try {
+				resolve(JSON.parse(line) as CheckResponse);
+			} catch {
+				consola.warn(`grounding checker returned invalid JSON: ${line}`);
+				resolve(failed("invalid", "invalid JSON from checker"));
+			}
 		});
-		child.on("exit", () => {
-			this.child = null; // let ensureStarted respawn on the next call
+		const reset = (reason: string) => {
+			if (this.child === child) this.child = null;
+			const pending = this.queue;
+			this.queue = [];
+			for (const resolve of pending) resolve(failed("unavailable", reason));
+		};
+		child.on("error", (err) => {
+			consola.warn(`grounding checker unavailable: ${err.message}`);
+			reset(err.message);
 		});
+		child.on("exit", () => reset("checker subprocess exited"));
+		child.stdin.on("error", () => {});
 
 		this.child = child;
 		return child;
 	}
 
-	async check(req: Omit<CheckRequest, "request_id">): Promise<VerifiedResult> {
+	async check(req: Omit<CheckRequest, "request_id">): Promise<CheckResponse> {
+		const request_id = String(this.nextId++);
 		try {
 			const child = this.ensureStarted();
-			const request_id = String(this.nextId++);
-			const full: CheckRequest = { ...req, request_id };
-
 			return await new Promise((resolve) => {
 				this.queue.push(resolve);
-				child.stdin.write(`${JSON.stringify(full)}\n`);
+				child.stdin.write(`${JSON.stringify({ ...req, request_id })}\n`, (err) => {
+					if (!err) return;
+					this.queue = this.queue.filter((r) => r !== resolve);
+					resolve(failed(request_id, err.message));
+				});
 			});
 		} catch (err) {
-			// a dead or missing checker binary should degrade, never take the agent down
-			consola.warn(`grounding checker unavailable: ${err instanceof Error ? err.message : err}`);
-			return {
-				...req,
-				request_id: "unavailable",
-				claim_check: { model_claimed: req.model_claimed, matches_evidence: "unverifiable" },
-			};
+			return failed(request_id, err instanceof Error ? err.message : String(err));
 		}
 	}
 
-	// Without this the checker subprocess stays alive as an orphan and keeps
-	// the CLI process from ever exiting on its own.
 	close(): void {
 		this.child?.kill();
 		this.child = null;
