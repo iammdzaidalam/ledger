@@ -1,21 +1,50 @@
 {
-	"name": "ledger",
-	"version": "0.1.0",
-	"description": "A grounded terminal coding agent that checks the model's claims against real tool output",
+	"name": "grounded-ledger",
+	"version": "0.2.0",
+	"description": "A terminal coding agent that checks the model's claims against real tool output",
 	"type": "module",
-	"bin": {
-		"ledger": "./src/index.ts"
+	"license": "MIT",
+	"author": "iammdzaidalam",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/iammdzaidalam/ledger.git"
 	},
+	"keywords": [
+		"ai",
+		"agent",
+		"cli",
+		"llm",
+		"coding-agent",
+		"hallucination",
+		"verification"
+	],
+	"bin": {
+		"ledger": "./dist/index.js"
+	},
+	"files": [
+		"dist",
+		"bin/grounding-checker-*",
+		"README.md",
+		"LICENSE"
+	],
 	"scripts": {
 		"dev": "tsx src/index.ts",
-		"build": "tsc",
+		"build": "npm run clean && tsc -p tsconfig.build.json && node scripts/build-checker.mjs",
 		"check": "biome check .",
 		"format": "biome format --write .",
 		"lint": "biome lint .",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"checker:build": "go -C checker build -o ../bin/grounding-checker .",
-		"checker:test": "go -C checker test ./..."
+		"checker:build": "node scripts/build-checker.mjs",
+		"checker:test": "go -C checker test ./...",
+		"typecheck": "tsc -p tsconfig.eval.json",
+		"checker:build:all": "node scripts/build-checker.mjs --all",
+		"prepublishOnly": "npm run typecheck && npm run clean && tsc -p tsconfig.build.json && npm run checker:build:all",
+		"eval:run": "tsx eval/run.ts",
+		"eval:label": "tsx eval/label.ts",
+		"eval:judge": "tsx eval/judge.ts",
+		"eval:score": "tsx eval/score.ts",
+		"clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.32.0",

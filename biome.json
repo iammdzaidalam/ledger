@@ -24,6 +24,6 @@
 		}
 	},
 	"files": {
-		"includes": ["src/**", "test/**", "!dist", "!node_modules"]
+		"includes": ["src/**", "test/**", "eval/**/*.ts", "scripts/**", "!dist", "!node_modules"]
 	}
 }
