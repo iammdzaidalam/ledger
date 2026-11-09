@@ -7,6 +7,16 @@ import type { ContentBlock } from "../types.js";
 import type { CompletionOptions, Provider, StreamEvent } from "./types.js";
 
 function toGeminiContents(messages: CompletionOptions["messages"]) {
+	// Gemini matches a functionResponse to its call by function name, not by id,
+	// so look up the name of the tool_use each result answers.
+	const toolNames = new Map<string, string>();
+	for (const m of messages) {
+		if (typeof m.content === "string") continue;
+		for (const block of m.content) {
+			if (block.type === "tool_use") toolNames.set(block.id, block.name);
+		}
+	}
+
 	return messages
 		.filter((m) => m.role !== "system")
 		.map((m) => {
@@ -23,7 +33,7 @@ function toGeminiContents(messages: CompletionOptions["messages"]) {
 				}
 				return {
 					functionResponse: {
-						name: block.tool_use_id,
+						name: toolNames.get(block.tool_use_id) ?? block.tool_use_id,
 						response: { output: block.content, is_error: block.is_error ?? false },
 					},
 				};
