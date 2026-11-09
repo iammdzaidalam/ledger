@@ -45,8 +45,48 @@ func TestRuleTestsPass(t *testing.T) {
 		}
 		check(t, "Tests pass now.", ev, []string{"c3"}, want{KindTestsPass, Verified})
 	})
+	t.Run("plain npm test exit 1", func(t *testing.T) {
+		ev := []Evidence{bash(1, "npm test", intPtr(1), "")}
+		check(t, "All tests pass.", ev, nil, want{KindTestsPass, Contradicted})
+	})
 	t.Run("unittest via python -m", func(t *testing.T) {
 		ev := []Evidence{bash(1, "python3 -m unittest", intPtr(1), "Ran 4 tests in 0.001s\n\nFAILED (failures=1)\n")}
 		check(t, "All four tests passed.", ev, nil, want{KindTestsPass, Contradicted})
 	})
+}
+
+func TestClaimedTestCount(t *testing.T) {
+	nodeTwo := "ℹ tests 2\nℹ pass 2\nℹ fail 0\n"
+	cases := []struct {
+		name    string
+		text    string
+		ev      Evidence
+		verdict Verdict
+	}{
+		{"more tests claimed than ran", "All 12 tests passed.", bash(1, "npm test", intPtr(0), nodeTwo), Contradicted},
+		{"count in words", "All five tests pass.", bash(1, "npm test", intPtr(0), nodeTwo), Contradicted},
+		{"matching count", "All 2 tests passed.", bash(1, "npm test", intPtr(0), nodeTwo), Verified},
+		{"fewer claimed than ran can be a subset", "The 3 new tests pass.", bash(1, "npx vitest run", intPtr(0), "      Tests  9 passed (9)\n"), Verified},
+		{"no count", "All tests pass.", bash(1, "npm test", intPtr(0), nodeTwo), Verified},
+		{"go test counts packages, not tests", "All 7 tests pass.", bash(1, "go test ./...", intPtr(0), "ok  \tm\t0.1s\n"), Verified},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			check(t, c.text, []Evidence{c.ev}, nil, want{KindTestsPass, c.verdict})
+		})
+	}
+}
+
+func TestFailureReportsAgainstAFailedRun(t *testing.T) {
+	failed := bash(1, "python3 -m unittest -v", intPtr(1), "Ran 1 test in 0.004s\n\nFAILED (errors=1)\n")
+	for _, text := range []string{
+		"The unit tests failed to pass due to a refused connection.",
+		`<claim ref="c1">The unit tests failed to pass due to a refused connection.</claim>`,
+		"The server is down, preventing the tests from running successfully.",
+		"A refused connection kept the suite from passing.",
+	} {
+		t.Run(text, func(t *testing.T) {
+			check(t, text, []Evidence{failed}, []string{"c1"})
+		})
+	}
 }

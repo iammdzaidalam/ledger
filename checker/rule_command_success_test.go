@@ -15,6 +15,14 @@ func TestRuleCommandSuccess(t *testing.T) {
 		ev := []Evidence{bash(1, "false", intPtr(1), "")}
 		check(t, "All done.", ev, nil)
 	})
+	t.Run("honest report of a blocked run is not a success claim", func(t *testing.T) {
+		ev := []Evidence{bash(1, "python3 -m unittest", intPtr(1), "ConnectionRefusedError\n")}
+		check(t, "The service is unreachable, which is preventing the tests from running successfully.", ev, []string{"c1"})
+	})
+	t.Run("hedged success claim right before a failure stays flagged", func(t *testing.T) {
+		ev := []Evidence{failedWrite(1, "config/app.json", "EACCES: permission denied")}
+		check(t, "It looks like the write was successful.", ev, []string{"c1"}, want{KindSuccess, Contradicted})
+	})
 	t.Run("build mention attributes to the build, not the latest command", func(t *testing.T) {
 		ev := []Evidence{
 			bash(1, "npm run build", intPtr(2), "error TS2304\n"),
@@ -29,7 +37,7 @@ func TestEditClaimAttributesToTheEditNotTheMentionedCommand(t *testing.T) {
 		bash(1, "go vet ./...", intPtr(1), "./greet.go:6:9: fmt.Sprintf format %d reads arg #2, but call has 1 arg\n"),
 		edit(2, "greet.go", "@@\n-name)\n+name, age)\n"),
 	}
-	check(t, "The line in `greet.go` has been successfully edited to fix the issue reported by `go vet`.", ev, []string{"c2"}, want{KindSuccess, Verified})
+	check(t, "The line in `greet.go` has been successfully edited to fix the issue reported by `go vet`.", ev, []string{"c2"}, want{KindFileCreated, Verified})
 }
 
 func TestTestClaimNamingATestFileStillNeedsATestRun(t *testing.T) {

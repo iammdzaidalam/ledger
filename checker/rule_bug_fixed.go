@@ -7,12 +7,12 @@ func checkBugFixed(c Claim, target Evidence, found bool, req CheckRequest) (Verd
 	}
 	failedBefore := map[string]bool{}
 	for _, e := range req.Evidence {
-		if e.Tool == "Bash" && e.Seq < change.Seq && !Succeeded(e) {
+		if IsCommand(e) && e.Seq < change.Seq && !Succeeded(e) {
 			failedBefore[CommandOf(e)] = true
 		}
 	}
 	rerun, ok := Latest(req.Evidence, func(e Evidence) bool {
-		if e.Tool != "Bash" || e.Seq <= change.Seq {
+		if !IsCommand(e) || e.Seq <= change.Seq {
 			return false
 		}
 		f := FamilyOf(e)

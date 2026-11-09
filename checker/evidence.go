@@ -22,7 +22,16 @@ var (
 	lintCommand  = regexp.MustCompile(`(?i)(^|[\s;&|("'])((npm|pnpm|yarn|bun)\s+(run\s+)?(lint|check|typecheck)\S*|npx\s+(eslint|biome|tsc|prettier)|eslint|biome\s+(check|lint|ci)|ruff(\s+check)?|flake8|pylint|mypy|golangci-lint|go\s+vet|gofmt\s+-l|staticcheck|tsc(\s+-p\s+\S+)?\s+--noEmit|prettier\s+--check|cargo\s+clippy|shellcheck)\b`)
 	buildCommand = regexp.MustCompile(`(?i)(^|[\s;&|("'])((npm|pnpm|yarn|bun)\s+run\s+build\S*|go\s+build|cargo\s+build|make(\s|$)|tsc(\s|$)|gcc|g\+\+|javac|mvn|gradle)`)
 	bashEdit     = regexp.MustCompile(`(sed\s+-i|perl\s+-pi|>\s*[\w./-]+\.\w+|tee\s+[\w./-]+|\bpatch\b|git\s+apply)`)
+	bashWrite    = regexp.MustCompile(`(^|[\s;&|(])(touch|mkdir|cp|mv|install|ln|tee|curl|wget|unzip|tar)\s|>|\bsed\s+-i|\bperl\s+-pi|\bpatch\b|\bgit\s+(apply|checkout|restore|mv)\b`)
 )
+
+func IsCommand(e Evidence) bool {
+	return e.Tool == "Bash" || e.Tool == "Git"
+}
+
+func WritesFiles(e Evidence) bool {
+	return IsCommand(e) && bashWrite.MatchString(CommandOf(e))
+}
 
 func CommandOf(e Evidence) string {
 	c, _ := e.Args["command"].(string)
@@ -58,7 +67,7 @@ func Succeeded(e Evidence) bool {
 	if !e.Executed || e.IsError {
 		return false
 	}
-	if e.Tool == "Bash" {
+	if IsCommand(e) {
 		return e.ExitCode != nil && *e.ExitCode == 0
 	}
 	return true
@@ -102,7 +111,7 @@ func SamePath(claimed, actual string) bool {
 
 func Describe(e Evidence) string {
 	switch e.Tool {
-	case "Bash":
+	case "Bash", "Git":
 		cmd := CommandOf(e)
 		if !e.Executed {
 			return "`" + cmd + "` never ran"

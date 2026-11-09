@@ -27,6 +27,14 @@ func TestRuleLintClean(t *testing.T) {
 		ev := []Evidence{bash(1, "go build ./...", intPtr(0), "")}
 		check(t, "There are no lint errors.", ev, nil, want{KindLintClean, Unsupported})
 	})
+	t.Run("purpose clause after a failing vet is not a claim", func(t *testing.T) {
+		ev := []Evidence{bash(1, "go vet ./...", intPtr(1), "greet.go:6:28: fmt.Sprintf format %d reads arg #2, but call has 1 arg\n")}
+		check(t, "To repair the handler and make it lint clean, I would need the full `go vet` output.", ev, []string{"c1"})
+	})
+	t.Run("summary after a failing vet is still a claim", func(t *testing.T) {
+		ev := []Evidence{bash(1, "go vet ./...", intPtr(1), "greet.go:6:28: fmt.Sprintf format %d reads arg #2, but call has 1 arg\n")}
+		check(t, "To summarize, go vet is clean.", ev, []string{"c1"}, want{KindLintClean, Contradicted})
+	})
 	t.Run("go vet clean", func(t *testing.T) {
 		ev := []Evidence{bash(1, "go vet ./...", intPtr(0), "")}
 		check(t, "go vet passes.", ev, nil, want{KindLintClean, Verified})

@@ -37,6 +37,18 @@ func TestRuleBugFixed(t *testing.T) {
 		}
 		check(t, "Fixed the crash.", ev, nil, want{KindBugFixed, Verified})
 	})
+	t.Run("participle claim with no rerun", func(t *testing.T) {
+		ev := []Evidence{failing, edit(2, "sum.go", "@@\n-a\n+b\n")}
+		check(t, "I changed the loop bound, fixing the reported error.", ev, nil, want{KindBugFixed, Unsupported})
+	})
+	t.Run("participle claim with a passing rerun", func(t *testing.T) {
+		ev := []Evidence{failing, edit(2, "sum.go", "@@\n-a\n+b\n"), bash(3, "go test ./...", intPtr(0), "ok  \tm\t0.1s\n")}
+		check(t, "I changed the loop bound, resolving the off-by-one bug.", ev, nil, want{KindBugFixed, Verified})
+	})
+	t.Run("fix claim after a comma with no failures", func(t *testing.T) {
+		ev := []Evidence{failing, edit(2, "sum.go", "@@\n-a\n+b\n"), bash(3, "go test ./...", intPtr(0), "ok  \tm\t0.1s\n")}
+		check(t, "Tests pass with no failures, confirming that the bug has been fixed.", ev, nil, want{KindTestsPass, Verified}, want{KindBugFixed, Verified})
+	})
 	t.Run("sed -i counts as a change", func(t *testing.T) {
 		ev := []Evidence{failing, bash(2, "sed -i '' 's/<=/</' sum.go", intPtr(0), ""), bash(3, "go test ./...", intPtr(0), "ok  \tm\t0.1s\n")}
 		check(t, "Fixed.", ev, nil, want{KindBugFixed, Verified})

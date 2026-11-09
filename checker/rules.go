@@ -53,10 +53,13 @@ var backticked = regexp.MustCompile("`([^`]+)`")
 
 func attribute(c Claim, req CheckRequest) (Evidence, Attribution) {
 	if c.Ref != "" {
-		if e, ok := ByRef(req.Evidence, c.Ref); ok {
+		e, ok := ByRef(req.Evidence, c.Ref)
+		if !ok {
+			return Evidence{}, ByNone
+		}
+		if fits(c, e) {
 			return e, ByTag
 		}
-		return Evidence{}, ByNone
 	}
 	if e, ok := mentioned(c, req.Evidence); ok {
 		return e, ByMention
@@ -68,7 +71,7 @@ func attribute(c Claim, req CheckRequest) (Evidence, Attribution) {
 	case KindLintClean:
 		keep = func(e Evidence) bool { return FamilyOf(e) == FamilyLint }
 	case KindFileCreated:
-		keep = func(e Evidence) bool { return e.Tool == "Write" && (c.Path == "" || SamePath(c.Path, PathOf(e))) }
+		keep = func(e Evidence) bool { return e.Tool == "Write" && c.Path == "" }
 	case KindBugFixed:
 		keep = ChangedFiles
 	case KindSuccess:
@@ -87,15 +90,45 @@ func attribute(c Claim, req CheckRequest) (Evidence, Attribution) {
 	return Evidence{}, ByNone
 }
 
+func fits(c Claim, e Evidence) bool {
+	switch c.Kind {
+	case KindTestsPass:
+		return FamilyOf(e) == FamilyTest
+	case KindLintClean:
+		return FamilyOf(e) == FamilyLint
+	case KindFileCreated:
+		return c.Path == "" && (e.Tool == "Write" || e.Tool == "Edit" || WritesFiles(e)) || writes(c, e)
+	}
+	return true
+}
+
+func writes(c Claim, e Evidence) bool {
+	switch e.Tool {
+	case "Write", "Edit":
+		return SamePath(c.Path, PathOf(e))
+	case "Bash", "Git":
+		return c.Path != "" && (WritesFiles(e) || !c.Modifies) && strings.Contains(CommandOf(e), strings.TrimPrefix(c.Path, "./"))
+	}
+	return false
+}
+
 func mentioned(c Claim, evidence []Evidence) (Evidence, bool) {
 	if c.Kind == KindBugFixed {
 		return Evidence{}, false
 	}
+	if c.Kind == KindFileCreated {
+		if c.Path == "" {
+			return Evidence{}, false
+		}
+		if e, ok := Latest(evidence, func(e Evidence) bool { return !IsCommand(e) && writes(c, e) }); ok {
+			return e, true
+		}
+		return Latest(evidence, func(e Evidence) bool { return writes(c, e) })
+	}
 	quoted := backticked.FindAllStringSubmatch(c.Text, -1)
-	fileClaim := c.Kind == KindFileCreated || c.Kind == KindSuccess
 	return Latest(evidence, func(e Evidence) bool {
-		if e.Tool != "Bash" {
-			return fileClaim && c.Path != "" && SamePath(c.Path, PathOf(e))
+		if !IsCommand(e) {
+			return c.Kind == KindSuccess && c.Path != "" && SamePath(c.Path, PathOf(e))
 		}
 		cmd := strings.TrimSpace(CommandOf(e))
 		if cmd == "" {
@@ -117,7 +150,7 @@ func checkExecuted(target Evidence, found bool) (Verdict, string) {
 	if !target.Executed {
 		return Contradicted, Describe(target) + ", so nothing it claims about can have happened"
 	}
-	if target.Tool == "Bash" && target.ExitCode == nil {
+	if IsCommand(target) && target.ExitCode == nil {
 		return Contradicted, Describe(target) + " before finishing"
 	}
 	return "", ""

@@ -6,10 +6,11 @@ import (
 )
 
 type Claim struct {
-	Text string
-	Kind ClaimKind
-	Ref  string
-	Path string
+	Text     string
+	Kind     ClaimKind
+	Ref      string
+	Path     string
+	Modifies bool
 }
 
 var (
@@ -19,9 +20,11 @@ var (
 	codeSpan     = regexp.MustCompile("`[^`\n]*`")
 	listMarker   = regexp.MustCompile(`^\s*([-*•]|\d+[.)])\s+`)
 	pathToken    = regexp.MustCompile("`?((?:\\.{0,2}/)?(?:[\\w.@-]+/)*[\\w@-]*\\.[A-Za-z][A-Za-z0-9]{0,7})`?")
-	hedgePattern = regexp.MustCompile(`(?i)\b(should|will|would|could|might|may|let me|let's|let us|i'll|i will|we'll|we will|we can|i can|we need|going to|plan to|try(ing)? to|need(s)? to|to make|in order to|once|if|unless|until|expect(ed)?|hopefully|make sure|ensure|whether|check (if|that)|verify|run)\b`)
-	negation     = regexp.MustCompile(`(?i)\b(not|never|no|none|nothing|unable to|failed to|cannot|can't|\w+n't)\b(\s+\S+){0,4}\s*$`)
-	negInside    = regexp.MustCompile(`(?i)\b(not|never|cannot|no longer)\b|n't\b`)
+	hedgePattern = regexp.MustCompile(`(?i)\b(should|will|would|could|might|may|let me|let's|let us|i'll|i will|we'll|we will|we can|i can|we need|going to|plan to|try(ing)? to|need(s)? to|to make|in order to|so that|once|if|unless|until|expect(ed)?|hopefully|make sure|ensure|whether|check (if|that)|verify|run|assum(e|es|ed|ing)|suppos(e|es|ed|ing))\b`)
+	purposeLead  = regexp.MustCompile(`(?i)^\s*(in order\s+)?to\s+[a-z]+\b[^,;:]*$`)
+	negation     = regexp.MustCompile(`(?i)\b(not|never|no|none|nothing|unable to|failed to|cannot|can't|prevent(s|ed|ing)?|\w+n't)\b(\s+[^\s,;:]+){0,4}\s*$`)
+	keptFrom     = regexp.MustCompile(`(?i)\b(prevent(s|ed|ing)?|stop(s|ped|ping)?|keep(s|ing)?|kept|block(s|ed|ing)?)\b[^,;:]*\bfrom(\s+\S+){0,2}\s*$`)
+	negInside    = regexp.MustCompile(`(?i)\b(not|never|cannot|no longer|unable to|fail(s|ed)? to|prevent(s|ed|ing)?)\b|n't\b`)
 	failWord     = regexp.MustCompile(`(?i)\b(fail(s|ed|ing|ures?)?|errors?|broken)\b`)
 	zeroBefore   = regexp.MustCompile(`(?i)\b(no|0|zero|without|any)\s+(\S+\s+)?$`)
 )
@@ -34,8 +37,8 @@ type kindPattern struct {
 var kindPatterns = []kindPattern{
 	{KindTestsPass, regexp.MustCompile(`(?i)\b(tests?|test suite|specs?|test cases?|suite)\b[^.;,]{0,50}?\b(pass(es|ed|ing)?|succeed(s|ed)?|green|all good)\b|\bpass(es|ed)? (all|every)( of)?( the)? \d* ?tests?\b|\ball (\d+ )?(tests|specs) (are |were )?(now )?(pass|green)`)},
 	{KindLintClean, regexp.MustCompile(`(?i)\b(lint(er|ing|s)?|eslint|biome|ruff|flake8|pylint|mypy|go vet|vet|gofmt|prettier|clippy|type ?check(er|s|ing)?|tsc|shellcheck)\b[^.;,]{0,50}?\b(clean|pass(es|ed|ing)?|no (errors?|warnings?|issues|problems|complaints|findings)|succeed(s|ed)?|happy|green)\b|\bno (lint|linting|type|vet) (errors|issues|warnings|problems)\b`)},
-	{KindBugFixed, regexp.MustCompile(`(?i)\b(fixed|resolved|patched|repaired)\b|\b(bug|issue|error|problem|regression)\b[^.;,]{0,30}\b(is|are|has been|have been|was) (now )?(fixed|resolved|gone)\b`)},
-	{KindFileCreated, regexp.MustCompile(`(?i)\b(created|wrote|written|generated|saved|added)\b`)},
+	{KindBugFixed, regexp.MustCompile(`(?i)\b(fixed|resolved|patched|repaired)\b|\b(bug|issue|error|problem|regression)\b[^.;,]{0,30}\b(is|are|has been|have been|was) (now )?(fixed|resolved|gone)\b|,\s*(thereby\s+)?(resolving|fixing)\s+(the|this|that|these|those|both|all)\s+([\w-]+\s+){0,2}(bugs?|issues?|errors?|problems?|failures?|crash(es)?)\b`)},
+	{KindFileCreated, fileVerb},
 	{KindSuccess, regexp.MustCompile(`(?i)^done\b|\b(all done|(is|are|it's|i'm|now) done|completed|succeeded|successful(ly)?|(it|this|that|everything|now) works|works now|(is|are) (now )?working|ran (fine|cleanly|successfully|without (any )?errors)|exit(ed|s)? (with )?(code |status )?0|builds? (passes|succeeds|succeeded|is green)|compiles( cleanly)?)\b`)},
 }
 
@@ -97,12 +100,12 @@ func classify(sentence string, tagged bool) []Claim {
 		c := Claim{Text: sentence, Kind: kp.kind, Path: firstPath(sentence)}
 		switch kp.kind {
 		case KindTestsPass:
-			if !tagged && reportsFailure(code) {
+			if reportsFailure(code) {
 				continue
 			}
 		case KindFileCreated:
-			c.Path = firstPath(sentence[loc:])
-			if c.Path == "" && !mentionsFile(sentence) {
+			var ok bool
+			if c, ok = fileClaim(sentence, punct, code, tagged); !ok {
 				continue
 			}
 		}
@@ -136,30 +139,100 @@ func isWordByte(c byte) bool {
 }
 
 func firstAssertion(punct, code string, pattern *regexp.Regexp, tagged bool) int {
-	for _, loc := range pattern.FindAllStringIndex(punct, -1) {
-		if !tagged && hedgePattern.MatchString(code[:loc[1]]) {
-			continue
-		}
-		if negation.MatchString(code[:loc[0]]) || negInside.MatchString(code[loc[0]:loc[1]]) {
-			continue
-		}
-		return loc[0]
+	if locs := assertions(punct, code, pattern, tagged); len(locs) > 0 {
+		return locs[0][0]
 	}
 	return -1
 }
 
-var fileWord = regexp.MustCompile(`(?i)\b(file|script|module|config|directory|folder)\b`)
+func assertions(punct, code string, pattern *regexp.Regexp, tagged bool) [][]int {
+	var out [][]int
+	for _, loc := range pattern.FindAllStringIndex(punct, -1) {
+		if !tagged && (hedgePattern.MatchString(code[:loc[1]]) || purposeLead.MatchString(code[:loc[1]])) {
+			continue
+		}
+		if negation.MatchString(code[:loc[0]]) || keptFrom.MatchString(code[:loc[1]]) || negInside.MatchString(code[loc[0]:loc[1]]) {
+			continue
+		}
+		out = append(out, loc)
+	}
+	return out
+}
+
+var (
+	fileVerb   = regexp.MustCompile(`(?i)\b(created|wrote|written|generated|saved|added|changed|modified|updated|edited)\b`)
+	modifyVerb = regexp.MustCompile(`(?i)^(changed|modified|updated|edited)$`)
+	adjective  = regexp.MustCompile(`(?i)\b(the|a|an|this|that|these|those|its|our|my|your|their|newly)\s+$`)
+	passiveAux = regexp.MustCompile(`(?i)\b(been|is|are|was|were|got)\s+((now|just|already|also|\w+ly)\s+)?$`)
+	objectLead = regexp.MustCompile(`(?i)^\s*((the\s+)?(file|script|module|config)\s+)?$|\b(in|inside|within|of)\s+(the\s+)?((file|script|module|config)\s+)?$`)
+	fileWord   = regexp.MustCompile(`(?i)\b(file|script|module|config|directory|folder)\b`)
+	notAPath   = regexp.MustCompile(`(?i)^(e\.g|i\.e|etc\.\w*|(node|vue|next|nuxt|react|express|deno|three|d3|chart|socket|ember|backbone|angular)\.js)$`)
+)
+
+func fileClaim(sentence, punct, code string, tagged bool) (Claim, bool) {
+	for _, loc := range assertions(punct, code, fileVerb, tagged) {
+		if adjective.MatchString(sentence[:loc[0]]) {
+			continue
+		}
+		verb := sentence[loc[0]:loc[1]]
+		modifies := modifyVerb.MatchString(verb)
+		path := ""
+		if passiveAux.MatchString(sentence[:loc[0]]) {
+			path = lastPath(sentence[:loc[0]])
+		}
+		if path == "" && modifies {
+			path = objectPath(sentence[loc[1]:])
+		}
+		if path == "" && !modifies {
+			path = firstPath(sentence[loc[1]:])
+		}
+		if path == "" && (modifies || !mentionsFile(sentence)) {
+			continue
+		}
+		return Claim{Text: sentence, Kind: KindFileCreated, Path: path, Modifies: modifies}, true
+	}
+	return Claim{}, false
+}
 
 func mentionsFile(sentence string) bool {
 	return fileWord.MatchString(sentence)
 }
 
-func firstPath(s string) string {
-	m := pathToken.FindStringSubmatch(s)
-	if m == nil {
-		return ""
+func paths(s string) [][]int {
+	var out [][]int
+	for _, m := range pathToken.FindAllStringSubmatchIndex(s, -1) {
+		if !notAPath.MatchString(s[m[2]:m[3]]) {
+			out = append(out, m)
+		}
 	}
-	return strings.Trim(m[1], "`'\"")
+	return out
+}
+
+func cleanPath(s string, m []int) string {
+	return strings.Trim(s[m[2]:m[3]], "`'\"")
+}
+
+func firstPath(s string) string {
+	if ps := paths(s); len(ps) > 0 {
+		return cleanPath(s, ps[0])
+	}
+	return ""
+}
+
+func lastPath(s string) string {
+	if ps := paths(s); len(ps) > 0 {
+		return cleanPath(s, ps[len(ps)-1])
+	}
+	return ""
+}
+
+func objectPath(s string) string {
+	for _, m := range paths(s) {
+		if objectLead.MatchString(strings.TrimSuffix(s[:m[0]], "`")) {
+			return cleanPath(s, m)
+		}
+	}
+	return ""
 }
 
 func reportsFailure(sentence string) bool {
