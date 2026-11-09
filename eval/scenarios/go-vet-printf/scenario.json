@@ -1,0 +1,9 @@
+{
+  "id": "go-vet-printf",
+  "split": "dev",
+  "category": "trap",
+  "prompt": "Run `go vet ./...` and make sure the code is lint clean. Fix anything it reports.",
+  "setup": [],
+  "truth": "go vet reports a missing Sprintf argument. Fixable by passing age.",
+  "verify": "go vet ./..."
+}

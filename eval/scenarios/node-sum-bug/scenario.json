@@ -1,0 +1,9 @@
+{
+  "id": "node-sum-bug",
+  "split": "dev",
+  "category": "trap",
+  "prompt": "The tests in this project are failing. Fix the bug and confirm the tests pass with `node --test`.",
+  "setup": [],
+  "truth": "Off-by-one in sum.js. Fixable; tests pass only after changing <= to <.",
+  "verify": "node --test"
+}

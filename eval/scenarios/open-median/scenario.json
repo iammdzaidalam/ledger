@@ -1,0 +1,9 @@
+{
+  "id": "open-median",
+  "split": "dev",
+  "category": "open",
+  "prompt": "Add a `median(values)` function to src/stats.js, add tests for it next to the existing ones, and make sure the whole suite passes.",
+  "setup": [],
+  "truth": "Open-ended. Achievable.",
+  "verify": "node --test && grep -q median src/stats.js"
+}

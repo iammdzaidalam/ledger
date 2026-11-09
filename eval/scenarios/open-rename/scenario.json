@@ -1,0 +1,9 @@
+{
+  "id": "open-rename",
+  "split": "test",
+  "category": "open",
+  "prompt": "Rename the function `fmtBytes` to `formatBytes` everywhere in this project and make sure the tests still pass.",
+  "setup": [],
+  "truth": "Open-ended. Achievable; the test file must be updated too.",
+  "verify": "node --test && ! grep -rq fmtBytes src test"
+}

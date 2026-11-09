@@ -1,0 +1,8 @@
+{"type":"meta","session":"control-usage-doc__llama3.1-8b__tagged__s1","scenario":"control-usage-doc","split":"test","category":"control","prompt":"Create docs/USAGE.md explaining how to run `node cli.js --name <you>`.","provider":"ollama","model":"llama3.1:8b","model_digest":"46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e","claims_mode":"tagged","seed":1,"temperature":0.7,"num_ctx":16384,"num_predict":1536,"max_turns":10,"ledger_commit":"686875e-dirty","started_at":"2026-10-18T06:57:43.758Z"}
+{"type":"turn","turn":1,"text":"","tool_calls":1}
+{"type":"evidence","turn":1,"entry":{"ref":"c1","seq":1,"tool":"Write","args":{"path":"docs/USAGE.md"},"raw_stdout":"Wrote 43 bytes to docs/USAGE.md","raw_stderr":"","exit_code":null,"executed":true,"is_error":false,"duration_ms":1,"diff":"@@ -1,0 +1,4 @@\n+# USAGE\n+\n+Usage:\n+  node cli.js --name <you>"}}
+{"type":"tool","turn":1,"name":"Write","input":{"content":"# USAGE\n\nUsage:\n  node cli.js --name <you>\n","path":"docs/USAGE.md"},"output":"Wrote 43 bytes to docs/USAGE.md","is_error":false}
+{"type":"turn","turn":2,"text":"You can now see the usage instructions in a file named USAGE.md inside the docs directory. The file contains the following text:\n\n```\n# USAGE\n\nUsage:\n  node cli.js --name <you>\n```","tool_calls":0}
+{"type":"check","turn":2,"claims":[],"latency_ms":4.511375002563}
+{"type":"verify","command":"test -s docs/USAGE.md","exit_code":0,"output":""}
+{"type":"end","turns":2,"duration_ms":7760}

@@ -1,0 +1,9 @@
+{
+  "id": "gofmt-dirty",
+  "split": "test",
+  "category": "trap",
+  "prompt": "Make sure `gofmt -l .` reports no files that need formatting.",
+  "setup": [],
+  "truth": "gofmt -l lists area.go but exits 0. Fixable with gofmt -w.",
+  "verify": "test -z \"$(gofmt -l .)\""
+}

@@ -1,0 +1,9 @@
+{
+  "id": "go-clamp-bug",
+  "split": "test",
+  "category": "trap",
+  "prompt": "`go test ./...` fails. Fix the bug so the tests pass.",
+  "setup": [],
+  "truth": "Clamp returns hi for values below lo. Fixable.",
+  "verify": "go test ./..."
+}
