@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import type { Tool } from "./types.js";
+import type { RawExecution, Tool, ToolResult } from "./types.js";
 import { errorResult, okResult } from "./types.js";
+import { shellCommand } from "./workspace.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 20_000;
 const DANGEROUS_PATTERNS = [/rm\s+-rf\s+\//, /mkfs/, /dd\s+if=.*of=\/dev/];
 
@@ -20,12 +22,12 @@ export const bashTool: Tool = {
 		type: "object",
 		properties: {
 			command: { type: "string", description: "The shell command to run" },
-			timeout_ms: { type: "number", description: "Timeout in ms, default 30000" },
+			timeout_ms: { type: "number", description: "Timeout in ms, default 30000, max 120000" },
 		},
 		required: ["command"],
 	},
 
-	async execute(input, meta): Promise<ReturnType<typeof okResult>> {
+	async execute(input, meta): Promise<ToolResult> {
 		const command = input.command as string;
 		if (DANGEROUS_PATTERNS.some((p) => p.test(command))) {
 			return errorResult("Command rejected: matches a destructive pattern");
@@ -34,16 +36,25 @@ export const bashTool: Tool = {
 		const startedAt = Date.now();
 
 		try {
-			const isWindows = process.platform === "win32";
-			const shell = isWindows ? "cmd.exe" : "/bin/sh";
-			const shellArgs = isWindows ? ["/c", command] : ["-c", command];
-			const timeoutMs = (input.timeout_ms as number | undefined) ?? DEFAULT_TIMEOUT_MS;
+			const shell = shellCommand(command);
+			const timeoutMs = Math.min(
+				(input.timeout_ms as number | undefined) ?? DEFAULT_TIMEOUT_MS,
+				MAX_TIMEOUT_MS,
+			);
 
-			const child = spawn(shell, shellArgs, { cwd: process.cwd(), env: process.env });
+			const child = spawn(shell.file, shell.args, { cwd: process.cwd(), env: process.env });
 
 			return await new Promise((resolve) => {
 				let stdout = "";
 				let stderr = "";
+				let settled = false;
+				const finish = (exec: Omit<RawExecution, "args" | "duration_ms">, result: ToolResult) => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					meta?.onExecution?.({ args: input, duration_ms: Date.now() - startedAt, ...exec });
+					resolve(result);
+				};
 				child.stdout?.on("data", (d: Buffer) => {
 					stdout += d.toString();
 				});
@@ -53,44 +64,38 @@ export const bashTool: Tool = {
 
 				const timer = setTimeout(() => {
 					child.kill();
-					meta?.onExecution?.({
-						args: input,
-						raw_stdout: truncate(stdout),
-						raw_stderr: truncate(stderr),
-						exit_code: null,
-						executed: true,
-						duration_ms: Date.now() - startedAt,
-					});
-					resolve(errorResult(`Command timed out after ${timeoutMs}ms`));
+					finish(
+						{
+							raw_stdout: truncate(stdout),
+							raw_stderr: truncate(stderr),
+							exit_code: null,
+							executed: true,
+							is_error: true,
+						},
+						errorResult(`Command timed out after ${timeoutMs}ms`),
+					);
 				}, timeoutMs);
 
 				// spawn itself failed, meaning the command never actually ran
 				child.on("error", (err) => {
-					clearTimeout(timer);
-					meta?.onExecution?.({
-						args: input,
-						raw_stdout: "",
-						raw_stderr: "",
-						exit_code: null,
-						executed: false,
-						duration_ms: Date.now() - startedAt,
-					});
-					resolve(errorResult(err));
+					finish(
+						{ raw_stdout: "", raw_stderr: "", exit_code: null, executed: false, is_error: true },
+						errorResult(err),
+					);
 				});
 
 				child.on("close", (code) => {
-					clearTimeout(timer);
-					meta?.onExecution?.({
-						args: input,
-						raw_stdout: truncate(stdout),
-						raw_stderr: truncate(stderr),
-						exit_code: code,
-						executed: true,
-						duration_ms: Date.now() - startedAt,
-					});
 					const combined = truncate(stdout + stderr);
-					if (code !== 0) resolve(errorResult(`Exit ${code}:\n${combined}`));
-					else resolve(okResult(combined || "(no output)"));
+					finish(
+						{
+							raw_stdout: truncate(stdout),
+							raw_stderr: truncate(stderr),
+							exit_code: code,
+							executed: true,
+							is_error: code !== 0,
+						},
+						code !== 0 ? errorResult(`Exit ${code}:\n${combined}`) : okResult(combined || "(no output)"),
+					);
 				});
 			});
 		} catch (err) {
@@ -100,6 +105,7 @@ export const bashTool: Tool = {
 				raw_stderr: "",
 				exit_code: null,
 				executed: false,
+				is_error: true,
 				duration_ms: Date.now() - startedAt,
 			});
 			return errorResult(err);
