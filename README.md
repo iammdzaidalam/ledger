@@ -2,10 +2,22 @@
 
 A terminal coding agent that checks its own claims before you have to.
 
+The agent runs `npm test`. It exits 1 with two failing tests. The agent replies
+"All tests pass." Ledger prints this right under that reply:
+
+```
+[FALSE CLAIM] tests_pass c3 | model said: "All tests pass." | evidence: `npm test` exited 1 (vitest: 5 passed, 2 failed)
+```
+
+That check is deterministic, takes about a millisecond, and costs nothing: no
+second model call.
+
 ```bash
-ledger "find every TODO in src/ and tell me what's left"
+git clone https://github.com/iammdzaidalam/ledger && cd ledger
+npm install && npm run build && npm link
+ledger "fix the failing test in src/sum.js"
 echo "explain the agent loop" | ledger -p
-ledger                       # interactive REPL
+ledger --provider ollama --model qwen2.5:7b   # fully local
 ```
 
 ---
@@ -13,11 +25,11 @@ ledger                       # interactive REPL
 ## Contents
 
 - [Overview](#overview)
-- [Features](#features)
+- [How a claim gets checked](#how-a-claim-gets-checked)
+- [The rules](#the-rules)
+- [Evaluation](#evaluation)
 - [System design](#system-design)
-- [The grounding layer](#the-grounding-layer)
 - [Project layout](#project-layout)
-- [Tech stack](#tech-stack)
 - [Getting started](#getting-started)
 - [Usage](#usage)
 - [Configuration](#configuration)
@@ -29,35 +41,103 @@ ledger                       # interactive REPL
 ## Overview
 
 Most agent loops stream a tool's raw output back into the model's context and
-just hope it gets read correctly. Nothing stops the model from saying "tests
-pass" when the exit code was 1, or "done" when the command timed out and
-never actually ran. You only find out later, if you're lucky enough to notice.
+hope it gets read correctly. Nothing stops the model from saying "tests pass"
+when the exit code was 1, "created config.json" when the write failed with
+EACCES, or "fixed it" when nothing was rerun after the edit.
 
-Ledger adds a deterministic check between the tool call and the summary you
-see. Every bash execution is captured as raw evidence, and once the model
-makes a claim about it, a small Go binary checks that claim against the exit
-code and output before it reaches your terminal. If they don't match, you see
-a flag right there, not three turns later when it's harder to untangle.
+Ledger records every Bash, Write and Edit call as evidence: exit code, stdout,
+stderr, whether it ran at all, and for file edits a real unified diff. At the
+end of each assistant turn, a small Go binary pulls the claims out of what the
+model said and checks each one against that evidence. Anything that does not
+hold up is flagged in the terminal right under the message, and with
+`--feedback` it goes back to the model so the next turn has to correct it.
 
-## Features
+## How a claim gets checked
 
-- **Grounded bash execution.** Every command's exit code, stdout/stderr, and
-  whether it actually ran gets checked against what the model says happened
-  next, by a separate deterministic process, not another LLM call.
-- **Three providers, one interface.** Claude, Gemini, and Groq implement a
-  common `Provider` contract. Switching is a single flag.
-- **Streaming end to end.** Async generators carry tokens from the HTTP
-  response through the agent loop to stdout.
-- **Seven filesystem and shell tools.** `Read`, `Write`, `Edit`, `Bash`,
-  `Grep`, `Find`, `Ls`, each a self-contained module with a JSON-Schema
-  signature the model sees.
-- **Provider-agnostic message format.** An internal content-block model
-  (text / tool-use / tool-result) is translated per provider.
-- **Layered configuration.** Global, project, and environment settings merge
-  in a predictable order of precedence.
-- **Two run modes.** A one-shot print mode for pipes and scripts, and a
-  readline REPL for interactive sessions.
-- **Session persistence.** Conversations are stored as append-only JSONL.
+```
+assistant turn text ──► split into sentences and clauses
+                         drop plans, hedges, questions, negations, code blocks
+                         classify: tests_pass · lint_clean · file_created · bug_fixed · command_success
+                                  │
+evidence log [c1 c2 c3 ...] ──────┤ attribute each claim:
+                                  │   1. <claim ref="c3"> tag, if the model used one
+                                  │   2. a command or path the sentence mentions
+                                  │   3. latest evidence of the same family (tests → latest test run)
+                                  │   4. latest fresh command, for a bare "done"
+                                  ▼
+                         run that kind's rule ──► verified · contradicted · unsupported · unverifiable
+```
+
+Claims are checked against the evidence *state* of the session, not glued to
+whichever call happened to be pending. "Tests pass" is a statement about the
+repo right now, so it is checked against the latest test run. That is also
+how Ledger catches a claim made with no tool call at all: "I ran the tests and
+they pass" with no test run in the log comes back `unsupported`.
+
+Why this happens after the turn and not at the tool call is covered in
+[docs/design/verify-after-the-turn.md](docs/design/verify-after-the-turn.md).
+
+### Structured claims (`--claims tagged`)
+
+With `--claims tagged`, tool results are prefixed with a ref (`[ref c3]`) and
+the model is asked to wrap each claim as `<claim ref="c3">all 12 tests pass</claim>`.
+That pins a claim to exactly one call. It is off by default on purpose: asking
+a model to declare its claims changes how it behaves, and false claims mostly
+live in plain prose. The eval reports both modes separately.
+
+## The rules
+
+Each rule is its own file in `checker/` with its own table-driven Go test.
+
+| Rule | Verified when | Flagged when |
+|---|---|---|
+| `tests_pass` | latest test run exited 0 and its summary shows passes and no failures | exit non-zero, summary reports failures (even with exit 0, e.g. `cmd; echo $?`), no test run at all, zero tests ran, or files changed after the run |
+| `lint_clean` | latest linter run exited 0 | exit non-zero, `gofmt -l` listed files (it exits 0 anyway), warnings reported when the claim says "no warnings", no linter run at all |
+| `file_created` | a Write/Edit to that path succeeded, or a bash command naming it exited 0 | the write failed, or nothing ever wrote that path |
+| `bug_fixed` | a non-empty diff, then a passing rerun of a test/build/lint command or of the command that failed before the edit | no file changed, no rerun after the last change, or the rerun failed |
+| `command_success` | the attributed command exited 0 | it exited non-zero |
+| `not_executed` | | the attributed command never started or timed out, whatever the model says |
+
+Test summaries are parsed for vitest, jest, pytest, go test, `node --test`,
+unittest, cargo and mocha. A custom script whose output contains one of those
+summaries counts as a test run too.
+
+## Evaluation
+
+The question the eval answers: on real agent sessions, how many false success
+claims does the checker catch, and how often is it wrong?
+
+**Setup.** 14 seeded scenarios in `eval/scenarios/`, each a tiny repo with a
+known ground truth: a failing test with a real bug, a test that needs a service
+that does not exist, a missing `npm test` script, a `go vet` error, a
+read-only directory, a test that hangs, `gofmt` drift, plus true-success
+controls where the claims are true (so false positives can show up) and two
+open-ended tasks. Scenarios are split into dev (rules were tuned on these) and
+held-out (scored once). Sessions run on local models through Ollama with
+`num_ctx`, `num_predict`, temperature and seed pinned and recorded in every
+trace, inside a sandbox that only lets the agent write to its scratch dir.
+
+**Labels.** Every assistant turn is labeled blind, without the checker's
+verdict, with the kinds of false claim it contains (`eval/LABELING.md`). The
+unit is one assistant turn and one claim kind. Traces are replayed through the
+current checker offline, so changing a rule never needs a model rerun.
+
+**Results so far (`eval/results/run1.md`).** 168 recorded sessions across
+qwen2.5:3b, qwen2.5:7b and llama3.1:8b, with 303 assistant turns that contain
+text. The checker found claims in 42 of those turns and flagged 17 of them.
+Checker latency per turn is 0.1 ms at p50 and 0.3 ms at p95, with zero LLM
+calls. The turns are not labeled yet, so there is no precision or recall
+number; every flag is listed in the results file to review by hand.
+
+Reproduce:
+
+```bash
+npm run checker:build
+npm run eval:run -- --out eval/traces/run1 --models qwen2.5:7b,llama3.1:8b,qwen2.5:3b --modes prose,tagged --seeds 1,2
+npm run eval:label -- --traces eval/traces/run1          # blind labeling CLI
+npm run eval:judge -- --traces eval/traces/run1          # optional LLM judge baseline
+npm run eval:score -- --traces eval/traces/run1 --labels human --judges ollama-qwen2.5-7b
+```
 
 ## System design
 
@@ -71,189 +151,107 @@ a flag right there, not three turns later when it's harder to untangle.
                                   ▼                ▼
                   ┌────────────────────────────────────────────────┐
                   │                 runAgent()                      │
-                  │   stream → collect tool calls → execute tools   │
-                  │   → check bash claims → append results → repeat │
+                  │  stream → check turn's claims → run tools →     │
+                  │  record evidence → append results → repeat      │
                   └───────┬───────────────────────────┬────────────┘
                           │ StreamEvent                │ tool call
                           ▼                            ▼
               ┌───────────────────────┐    ┌──────────────────────┐
               │       Provider         │    │     Tool registry     │
-              │ claude │ gemini │ groq │    │ Read Write Edit Bash  │
-              │  (adapters → SDKs)     │    │ Grep Find Ls          │
+              │ claude gemini groq     │    │ Read Write Edit Bash  │
+              │ ollama                 │    │ Grep Find Ls          │
               └───────────────────────┘    └──────────┬────────────┘
-                          │                            │ bash only
-                          ▼                            ▼
-                   provider APIs             ┌──────────────────────┐
+                                                       │ Bash Write Edit
+                                                       ▼
+                                             ┌──────────────────────┐
+                                             │     EvidenceLog       │
+                                             │  c1 c2 c3 ... + diff  │
+                                             └──────────┬────────────┘
+                                   turn text + evidence  ▼
+                                             ┌──────────────────────┐
                                              │  grounding checker     │
-                                             │  (Go binary, stdin/    │
-                                             │   stdout JSON lines)   │
+                                             │  Go, JSON lines over   │
+                                             │  stdin/stdout          │
                                              └──────────┬────────────┘
                                                         ▼
-                                                 VerifiedResult
-                                            fed back into the loop
+                                          one verdict per claim, flags
+                                          rendered and optionally fed back
 ```
 
 Two event streams hold the system together:
 
-- **`StreamEvent`**: what a provider yields, `text_delta`,
-  `tool_use_start` / `tool_use_input_delta` / `tool_use_end`, `message_end`.
-  Each provider's only job is turning its SDK's chunks into this vocabulary.
-- **`AgentEvent`**: what the loop yields to a UI, `agent_start`, `text_delta`,
-  `tool_start` / `tool_end`, `grounding_flag`, `turn_end`, `agent_end`.
+- **`StreamEvent`**: what a provider yields: `text_delta`, `tool_use_start` /
+  `tool_use_input_delta` / `tool_use_end`, `message_end`.
+- **`AgentEvent`**: what the loop yields to a UI: `text_delta`, `tool_start` /
+  `tool_end`, `evidence`, `assistant_turn`, `grounding_check`,
+  `grounding_flag`, `turn_end`, `agent_end`.
 
-This separation means a new provider never touches the agent loop, and a new
-UI never touches the providers or the grounding layer.
+A new provider never touches the agent loop, and a new UI never touches the
+providers or the grounding layer. The eval recorder is just another consumer
+of `AgentEvent`.
 
-### The agent loop
+### Why Go for the checker
 
-`runAgent` (`src/agent/loop.ts`) is the core:
-
-1. Send the message history to the provider and stream the response.
-2. Render text as it arrives; reassemble tool calls from their streamed
-   fragments (providers deliver arguments in pieces, keyed by id).
-3. Check any bash results still pending from the previous round against this
-   turn's text, and flag whatever doesn't match the evidence.
-4. If the turn produced no tool calls, stop.
-5. Otherwise run each tool, append the results as a new user turn, and loop.
-6. Cap at `maxTurns` (default 20) so a misbehaving model cannot run forever.
-
-One subtlety: continuation is decided by whether the assistant's response
-actually contains a `tool_use` block, not by trusting the provider's reported
-stop reason. Some providers report an end-of-turn signal even when they did
-call a tool, so this keeps one rule true across all three.
-
-## The grounding layer
-
-This is the actual reason the project exists. A model claiming a command
-succeeded is not the same thing as it having succeeded, and nothing in a
-typical agent loop checks the difference.
-
-Every bash call produces raw evidence before any claim exists to check it
-against:
-
-```ts
-interface ToolExecution {
-  tool: string;
-  args: Record<string, unknown>;
-  raw_stdout: string;
-  raw_stderr: string;
-  exit_code: number | null;
-  executed: boolean;      // did the process actually start and run
-  duration_ms: number;
-}
-```
-
-The claim about that result always shows up in the model's *next* turn, after
-the tool result has already been appended to the conversation. So checking it
-is naturally a step that happens once that next turn streams in, not
-something bolted onto the tool call itself. Once it arrives, the raw evidence
-and the claimed text get sent as one line of JSON to a small, dependency-free
-Go binary (`checker/`), which runs three deterministic rules and hands back a
-verdict, no LLM involved:
-
-1. **The command never actually executed.** Hard fail, regardless of what the
-   model says, since there's nothing to be right or wrong about if it never ran.
-2. **Exit code is non-zero, but the model's text uses success language**
-   ("done", "fixed", "passes", and so on).
-3. **Both stdout and stderr came back empty on something that looks like a
-   test or build command.** Flagged as unverifiable rather than silently
-   passed through. Empty output from `ls` on an empty directory is fine,
-   empty output from `npm test` is suspicious.
-
-When a check trips, it surfaces immediately in the terminal:
-
-```
-[UNVERIFIED CLAIM] Bash exited 1 | model said: "All tests pass now." | evidence: ModuleNotFoundError: no module named foo
-```
-
-Why Go for this one piece and not the whole system: the agent loop and
-provider adapters spend almost all their time waiting on network streams, so
-TypeScript is the right tool there. The checker is different, it's a
-CPU-bound pattern match that runs on every single bash call, and it's the one
-part of the system where a slow or buggy check would defeat the entire point.
-A small binary talking JSON lines over stdin/stdout keeps that path fast and
-easy to read start to finish.
-
-This is a heuristic, not a proof system. String matching for "did the model
-claim success" will have false positives and negatives, especially early on.
-That's an accepted tradeoff for a first version, not an oversight.
+The agent loop and provider adapters spend almost all their time waiting on
+network streams, so TypeScript is the right tool there. The checker runs on
+every assistant turn, and it is the one part where a slow or wrong check
+defeats the point. One long-lived binary talking JSON lines keeps it fast,
+dependency-free, and testable on its own with `go test`.
 
 ## Project layout
 
 ```
 src/
-├── index.ts               # bin entry point
-├── main.ts                # wiring: args → settings → prompt → mode
-├── types.ts                # shared message / content-block types
-├── cli/
-│   └── args.ts            # argument parser, help, version
-├── config/
-│   ├── settings.ts        # global/project/env settings cascade
-│   └── system-prompt.ts   # prompt assembly + project context files
-├── providers/
-│   ├── types.ts           # Provider / StreamEvent / ModelInfo contracts
-│   ├── claude.ts           # Claude adapter
-│   ├── gemini.ts            # Gemini adapter
-│   ├── groq.ts              # Groq adapter
-│   └── index.ts             # provider factory + model registry
-├── tools/
-│   ├── types.ts            # Tool contract + result helpers
-│   ├── {read,write,edit,bash,grep,find,ls}.ts
-│   └── index.ts             # tool registry + JSON-Schema export
+├── index.ts, main.ts           # bin entry and wiring
+├── agent/loop.ts               # the agent loop, grounding hook included
 ├── grounding/
-│   ├── types.ts             # wire types shared with the Go checker
-│   ├── client.ts             # spawns and talks to the checker binary
-│   ├── claim-extractor.ts    # pulls claim text out of the next turn
-│   └── format.ts             # renders a flagged result as one terminal line
-├── agent/
-│   ├── types.ts
-│   └── loop.ts               # the agent loop, grounding hook included
-├── session/
-│   ├── types.ts
-│   └── store.ts               # JSONL read/append
-└── modes/
-    ├── print.ts               # one-shot streaming to stdout
-    └── interactive.ts          # readline REPL
+│   ├── evidence.ts             # EvidenceLog: refs, fresh tracking
+│   ├── client.ts               # talks to the checker binary
+│   ├── format.ts               # flag lines and feedback text
+│   └── types.ts                # wire types shared with the Go checker
+├── providers/                  # claude, gemini, groq, ollama adapters
+├── tools/                      # read write edit bash grep find ls, diff, workspace sandbox
+├── modes/                      # print and interactive
+├── session/                    # JSONL session store
+└── config/, cli/
 
-checker/                       # separate Go module
-├── main.go                    # stdin/stdout JSON-line loop
-├── protocol.go                 # CheckRequest / VerifiedResult structs
-├── rules.go                    # the three deterministic rules
-└── *_test.go                   # table-driven tests per rule
+checker/                        # Go module, no third-party deps
+├── main.go, protocol.go        # JSON-line loop and wire types
+├── claims.go                   # sentence split, hedges, negation, claim kinds, tags
+├── evidence.go                 # command families, helpers
+├── testsummary.go              # test runner summary parsers
+├── rules.go                    # attribution and dispatch
+├── rule_*.go                   # one file per rule
+└── *_test.go                   # one test file per rule, plus parsers and attribution
 
-test/                           # provider, tool, agent, and grounding suites
+eval/
+├── scenarios/                  # seeded fixture repos with ground truth
+├── run.ts                      # records sessions as JSONL traces
+├── label.ts                    # blind labeling CLI
+├── judge.ts                    # optional LLM judge baseline
+├── score.ts                    # offline replay, precision and recall
+└── traces/, labels/, results/
+
+docs/design/                    # design docs
 ```
-
-## Tech stack
-
-| Layer | Choice |
-|---|---|
-| Agent loop, CLI, provider adapters | TypeScript (strict), ESM, Node 22+ |
-| Grounding checker | Go, single static binary, no third-party deps |
-| Model SDKs | `@anthropic-ai/sdk`, `@google/genai`, `groq-sdk` |
-| Terminal output | `consola` |
-| Session storage | append-only JSONL |
-| Testing | Vitest (TS side), Go's built-in `testing` (checker side) |
 
 ## Getting started
 
-Requires **Node 22+**, **Go 1.22+**, and at least one provider key.
+Requires **Node 22+** and **Go 1.22+** to build from source. The release
+workflow builds prebuilt checker binaries for macOS, Linux and Windows.
 
 ```bash
 npm install
-cp .env.example .env       # add your key(s)
+cp .env.example .env       # add any provider keys you have
 npm run checker:build      # builds bin/grounding-checker
-```
-
-```bash
-# .env
-ANTHROPIC_API_KEY=...      # https://console.anthropic.com
-GEMINI_API_KEY=...         # https://aistudio.google.com/apikey
-GROQ_API_KEY=...           # https://console.groq.com/keys
-```
-
-```bash
 npm run dev -- "list the typescript files under src"
+```
+
+No keys? Use Ollama:
+
+```bash
+ollama pull qwen2.5:7b
+npm run dev -- --provider ollama --model qwen2.5:7b "run the tests"
 ```
 
 ## Usage
@@ -264,15 +262,14 @@ ledger --print [message]    One-shot: stream the answer to stdout
 echo "..." | ledger -p      Read the prompt from a pipe
 
 Options
-  --provider <name>   claude (default), gemini, or groq
-  --model <id>        Specific model (see supported models below)
+  --provider <name>   claude (default), gemini, groq, or ollama
+  --model <id>        Specific model id (any local tag for ollama)
+  --session <id>      Session id, written to .ledger/sessions/<id>.jsonl
+  --claims <mode>     prose (default) or tagged
+  --feedback          Send flagged claims back to the model to correct
   --print, -p         Non-interactive output
   --version, -v
   --help, -h
-```
-
-```bash
-ledger --provider gemini "refactor src/tools/grep.ts"
 ```
 
 ## Configuration
@@ -286,31 +283,35 @@ Settings merge from three sources, each overriding the previous:
 ```jsonc
 // .ledger/settings.json
 {
-  "provider": "groq",
-  "model": "llama-3.3-70b-versatile",
+  "provider": "ollama",
+  "model": "qwen2.5:7b",
+  "claimsMode": "prose",
+  "feedback": true,
   "systemPromptExtra": "Prefer functional style. Keep diffs small."
 }
 ```
 
-The system prompt is assembled at startup from base instructions, the live
-tool list, and the first of these files found in the working directory:
-`AGENTS.md`, `CLAUDE.md`, `.context`, `.ledger/context.md`.
+| Variable | Effect |
+|---|---|
+| `OLLAMA_HOST` | Ollama address, default `http://127.0.0.1:11434` |
+| `LEDGER_OLLAMA_NUM_CTX` | context window sent to Ollama, default 16384 |
+| `LEDGER_OLLAMA_NUM_PREDICT` | cap on tokens per turn |
+| `LEDGER_SEED` | sampling seed, for reproducible runs |
+| `LEDGER_TEMPERATURE` | default sampling temperature for Ollama |
+| `LEDGER_WORKSPACE` | confine Write/Edit to this dir, and on macOS run Bash under `sandbox-exec` with writes limited to it |
+| `LEDGER_CHECKER_PATH` | use a specific checker binary |
 
 ## Tools
 
 | Tool | What it does |
 |------|--------------|
 | `Read` | Read a file; returns content with line numbers, supports offset/limit |
-| `Write` | Create or overwrite a file, making parent directories |
-| `Edit` | Replace an exact, unique string in a file |
-| `Bash` | Run a shell command (30s timeout, output capped, grounded) |
+| `Write` | Create or overwrite a file, making parent directories; records a diff |
+| `Edit` | Replace an exact, unique string in a file; records a diff |
+| `Bash` | Run a shell command (30s default, 120s max, output capped) |
 | `Grep` | Regex search across file contents |
 | `Find` | Locate files by glob-style name pattern |
 | `Ls` | List a directory with types and sizes |
-
-A tool is an object implementing the `Tool` interface: a name, a
-description, a JSON-Schema `inputSchema`, and an async `execute`. Register it
-in `src/tools/index.ts` and it is immediately offered to the model.
 
 ## Supported models
 
@@ -322,34 +323,31 @@ in `src/tools/index.ts` and it is immediately offered to the model.
 | Gemini | `gemini-2.5-flash` | 1M |
 | Groq | `llama-3.3-70b-versatile` | 128K |
 | Groq | `llama-3.1-8b-instant` | 128K |
-
-Adding a model is one entry in `src/providers/index.ts`.
+| Ollama | any local tag, e.g. `qwen2.5:7b`, `llama3.1:8b` | set by `num_ctx` |
 
 ## Development
 
 ```bash
-npm run dev            # run from source
-npm run build           # tsc → dist/
-npm run check            # biome lint + format check
-npm test                 # vitest
-npm run checker:build    # go build → bin/grounding-checker
-npm run checker:test     # go test ./checker/...
+npm run dev              # run from source
+npm run build            # dist/ + checker for this machine
+npm run typecheck        # src, test and eval
+npx biome check .        # lint + format
+npx vitest run           # TS suites, against the real checker binary
+go -C checker test ./... # checker rules
 ```
+
+CI runs all of the above on Linux and macOS. Tagging `v*` publishes to npm
+with prebuilt checker binaries for five platforms.
 
 ## Design notes
 
-- **Why the grounding check happens after the next turn, not during tool
-  dispatch.** The claim about a result only exists once the model has spoken
-  again. Checking earlier would mean checking against nothing.
-- **Why Go for the checker specifically, not the whole system.** It's the one
-  part of the loop that runs on every single tool call and needs to stay out
-  of Node's event loop while it does its pattern matching. Simple and fast
-  beats clever here.
+- **Why the check happens after the turn.** A claim about a result only
+  exists once the model has seen the result and spoken again. See the
+  [design doc](docs/design/verify-after-the-turn.md).
 - **Why a turn cap.** Tool-using models can loop. A hard `maxTurns` bound
   makes runs predictable and bounds cost.
-- **Why the checker is upfront about being a heuristic.** Deterministic
-  string matching for "did the model claim success" is crude by nature. It's
-  meant to catch the obvious, embarrassing cases, not to be a formal
-  verifier.
+- **Why heuristics and not a judge model.** Deterministic rules are fast,
+  free, and give the same answer twice. The eval puts a number on what they
+  miss, next to an LLM judge on the same turns.
 - **Adding a provider** means implementing one `complete()` generator that
-  emits `StreamEvent`s; nothing else in the system changes.
+  emits `StreamEvent`s; nothing else changes.
