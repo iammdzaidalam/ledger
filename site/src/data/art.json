@@ -1,0 +1,63 @@
+{
+	"sources": {
+		"syndics": {
+			"artist": "Rembrandt van Rijn",
+			"title": "The Syndics of the Drapers' Guild (De Staalmeesters)",
+			"year": "1662",
+			"collection": "Rijksmuseum, Amsterdam",
+			"commons": "https://commons.wikimedia.org/wiki/File:Rembrandt_-_De_Staalmeesters-_het_college_van_staalmeesters_(waardijns)_van_het_Amsterdamse_lakenbereidersgilde_-_Google_Art_Project.jpg",
+			"license": "Public domain (PD-Art, PD-old-100)"
+		},
+		"moneylender": {
+			"artist": "Quentin Matsys",
+			"title": "The Moneylender and His Wife",
+			"year": "1514",
+			"collection": "Musée du Louvre, Paris",
+			"commons": "https://commons.wikimedia.org/wiki/File:Massysm_Quentin_%E2%80%94_The_Moneylender_and_his_Wife_%E2%80%94_1514.jpg",
+			"license": "Public domain (PD-Art, Yorck Project)"
+		}
+	},
+	"pieces": {
+		"syndics": {
+			"name": "syndics",
+			"width": 3840,
+			"height": 2595,
+			"files": {
+				"webp": [
+					{
+						"file": "syndics-1200.webp",
+						"width": 1200
+					},
+					{
+						"file": "syndics-2000.webp",
+						"width": 2000
+					}
+				],
+				"jpg": "syndics-1600.jpg"
+			},
+			"alt": "Rembrandt's Syndics of the Drapers' Guild: five officials in black hats at a table with an open book, looking up as if interrupted, and a servant behind them.",
+			"source": "syndics"
+		},
+		"moneylender": {
+			"name": "moneylender",
+			"width": 700,
+			"height": 1080,
+			"files": {
+				"webp": [
+					{
+						"file": "moneylender-480.webp",
+						"width": 480
+					},
+					{
+						"file": "moneylender-800.webp",
+						"width": 700
+					}
+				],
+				"jpg": "moneylender-640.jpg"
+			},
+			"alt": "Detail of Matsys's Moneylender: a man in a green turban weighing coins on a small balance.",
+			"source": "moneylender"
+		}
+	},
+	"faces": []
+}

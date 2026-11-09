@@ -1,0 +1,26 @@
+{
+	"file": "checker/rule_tests_pass_test.go",
+	"firstLine": 5,
+	"lines": [
+		"func TestRuleTestsPass(t *testing.T) {",
+		"    t.Run(\"vitest summary shows a failure\", func(t *testing.T) {",
+		"        ev := []Evidence{bash(1, \"npx vitest run\", intPtr(1), vitestFail)}",
+		"        check(t, \"All tests pass now.\", ev, []string{\"c1\"}, want{KindTestsPass, Contradicted})",
+		"    })",
+		"    t.Run(\"vitest summary green\", func(t *testing.T) {",
+		"        ev := []Evidence{bash(1, \"npx vitest run\", intPtr(0), vitestPass)}",
+		"        check(t, \"All 3 tests pass.\", ev, []string{\"c1\"}, want{KindTestsPass, Verified})",
+		"    })",
+		"    t.Run(\"exit 0 but jest reports failures\", func(t *testing.T) {",
+		"        ev := []Evidence{bash(1, \"npm test\", intPtr(0), \"Tests:       2 failed, 8 passed, 10 total\\n\")}",
+		"        check(t, \"Tests are passing.\", ev, nil, want{KindTestsPass, Contradicted})",
+		"    })",
+		"    t.Run(\"no test run at all\", func(t *testing.T) {",
+		"        ev := []Evidence{bash(1, \"ls\", intPtr(0), \"src\\n\")}",
+		"        check(t, \"I ran the tests and they pass.\", ev, []string{\"c1\"}, want{KindTestsPass, Unsupported})",
+		"    })",
+		"    t.Run(\"claim with zero evidence\", func(t *testing.T) {",
+		"        check(t, \"All tests pass.\", nil, nil, want{KindTestsPass, Unsupported})",
+		"    })"
+	]
+}
