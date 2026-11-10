@@ -6,5 +6,5 @@ bin/
 .ledger/
 sessions/
 
-eval/traces/openhands/
+eval/traces/openhands*/
 eval/packets/

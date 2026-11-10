@@ -21,7 +21,7 @@ for (const [platform, arch] of targets) {
 	const out = all
 		? join(root, "bin", `grounding-checker-${platform}-${arch}${ext}`)
 		: join(root, "bin", `grounding-checker${ext}`);
-	execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", out, "."], {
+	execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", out, "./cmd/grounding-checker"], {
 		cwd: join(root, "checker"),
 		stdio: "inherit",
 		env: { ...process.env, GOOS: goos[platform], GOARCH: goarch[arch], CGO_ENABLED: "0" },

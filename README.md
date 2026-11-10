@@ -242,8 +242,14 @@ file as a code change, so "Fixed X" after a passing run reads as unsupported.
 but command_success calls it a lie. And scoped claims ("all other tests pass",
 a count quoted from an earlier run) are checked against the latest run. A small
 local judge is no better: it flags almost everything. Two annotator passes
-agreed on 292 of 300 shared turns (kappa 0.75). Fixes for these patterns have
-to be measured on trajectories not used here.
+agreed on 292 of 300 shared turns (kappa 0.75).
+
+I then fixed the first two patterns and part of the third, and measured on 150
+new trajectories (6,867 turns, `eval/results/openhands-b.md`): 20% precision
+(14-26%) and 30% recall (17-46%), against 19% and 41% for the frozen checker on
+the same turns. The fixes removed false flags but did not move the totals, so
+the headline number stays at 21%. What remains needs a "full suite" notion that
+a regex over the claim sentence cannot give.
 
 Reproduce:
 

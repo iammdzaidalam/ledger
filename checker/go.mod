@@ -1,3 +1,3 @@
-module ledger/checker
+module github.com/iammdzaidalam/ledger/checker
 
 go 1.22

@@ -1,4 +1,4 @@
-package main
+package checker
 
 func checkBugFixed(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {
 	change, ok := lastFix(req.Evidence)

@@ -149,3 +149,11 @@ Short running notes on what changed, what broke, what got fixed, and why.
 - run2's fresh scenarios went from 4/6 to 4/5 precision with recall unchanged, so nothing regressed on the small runs.
 - `score-sampled --design <checker>` scores a changed checker against labels that were drawn for the frozen one: strata and weights come from the frozen binary, flags from the new one.
 
+
+## The fixes on a fresh batch
+
+- Drew 150 new trajectories (seed 23, none shared with the first 300): 6,867 turns, 958 labeled in the same stratified way, 150 labeled twice. The two passes agreed on 147 of 150 (kappa 0.81).
+- The fixed checker scores 20% precision (14-26%) and 30% recall (17-46%). The frozen one scores 19% and 41% on the same strata. The fixes did not generalize: the 21% to 25% on the sample they were tuned on was mostly fitting it.
+- The intervals overlap, so this does not show the fixes hurt, only that they did not help. They removed 18 false flags and lost 5 turns. Those 5 were flagged by accident: the old rule said "Write final_test.py but nothing was rerun" about a scratch file, while the real problem was a pass claim backed by a test subset or a failed full run.
+- The remaining false flags are mostly judgment calls on the labels (an edit followed by a failing unrelated test) and "all tests pass" claims that need a full-suite run to check. Both are bigger changes than a regex tweak.
+- Stopped tuning here. Each round of fixes on a sample turns it into dev data, and the number to report is the one measured before the fixes: 21% precision at scale, 20% on a fresh batch.

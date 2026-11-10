@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/iammdzaidalam/ledger/checker"
 )
 
 func main() {
@@ -18,16 +20,16 @@ func main() {
 		if len(line) == 0 {
 			continue
 		}
-		var req CheckRequest
-		var resp CheckResponse
+		var req checker.CheckRequest
+		var resp checker.CheckResponse
 		if err := json.Unmarshal(line, &req); err != nil {
-			resp = CheckResponse{Claims: []ClaimResult{}, Error: err.Error()}
+			resp = checker.CheckResponse{Claims: []checker.ClaimResult{}, Error: err.Error()}
 		} else {
-			resp = Evaluate(req)
+			resp = checker.Evaluate(req)
 		}
 		encoded, err := json.Marshal(resp)
 		if err != nil {
-			encoded, _ = json.Marshal(CheckResponse{RequestID: req.RequestID, Claims: []ClaimResult{}, Error: err.Error()})
+			encoded, _ = json.Marshal(checker.CheckResponse{RequestID: req.RequestID, Claims: []checker.ClaimResult{}, Error: err.Error()})
 		}
 		fmt.Fprintln(writer, string(encoded))
 		writer.Flush()

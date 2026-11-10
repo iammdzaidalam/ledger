@@ -10,6 +10,7 @@ const ROWS = "https://datasets-server.huggingface.co/rows";
 const count = Number(arg("count", "200"));
 const seed = Number(arg("seed", "11"));
 const out = resolve(arg("out", join("eval", "traces", "openhands")) as string);
+const exclude = arg("exclude");
 
 interface ToolCall {
 	id: string;
@@ -43,7 +44,7 @@ function offsets(total: number, n: number, start: number): number[] {
 		s = (s * 1103515245 + 12345) % 2147483648;
 		picked.add(s % total);
 	}
-	return [...picked].sort((a, b) => a - b);
+	return [...picked];
 }
 
 async function fetchRows(offset: number, length: number): Promise<{ rows: Row[]; total: number }> {
@@ -203,7 +204,13 @@ function convert(row: Row): { session: string; lines: TraceLine[] } {
 }
 
 const { total } = await fetchRows(0, 1);
-const picks = offsets(total, count, seed);
+const taken = new Set(
+	exclude ? (await readFile(exclude, "utf-8")).split("\n").filter(Boolean).map(Number) : [],
+);
+const picks = offsets(total, count + taken.size, seed)
+	.filter((o) => !taken.has(o))
+	.slice(0, count)
+	.sort((a, b) => a - b);
 await mkdir(out, { recursive: true });
 const manifest = join(out, "offsets.txt");
 const done = new Set(

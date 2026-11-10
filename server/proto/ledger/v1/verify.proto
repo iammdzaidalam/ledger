@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package ledger.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/iammdzaidalam/ledger/server/gen/ledger/v1;ledgerv1";
+
+service VerifyService {
+  rpc Check(CheckRequest) returns (CheckResponse);
+  rpc RecordTurn(RecordTurnRequest) returns (RecordTurnResponse);
+  rpc GetRun(GetRunRequest) returns (GetRunResponse);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+}
+
+message Evidence {
+  string ref = 1;
+  int32 seq = 2;
+  string tool = 3;
+  google.protobuf.Struct args = 4;
+  string raw_stdout = 5;
+  string raw_stderr = 6;
+  optional int32 exit_code = 7;
+  bool executed = 8;
+  bool is_error = 9;
+  int64 duration_ms = 10;
+  string diff = 11;
+}
+
+message Claim {
+  string text = 1;
+  string kind = 2;
+  string ref = 3;
+  string attribution = 4;
+  string verdict = 5;
+  string rule = 6;
+  string reason = 7;
+}
+
+message CheckRequest {
+  string turn_text = 1;
+  repeated Evidence evidence = 2;
+  repeated string fresh_refs = 3;
+}
+
+message CheckResponse {
+  repeated Claim claims = 1;
+  bool flagged = 2;
+  int64 latency_us = 3;
+}
+
+message RunInfo {
+  string source = 1;
+  string model = 2;
+  string task = 3;
+}
+
+message RecordTurnRequest {
+  string run_id = 1;
+  int32 turn = 2;
+  string turn_text = 3;
+  repeated Evidence evidence = 4;
+  repeated string fresh_refs = 5;
+  RunInfo run = 6;
+  bool judge = 7;
+}
+
+message RecordTurnResponse {
+  CheckResponse check = 1;
+  bool duplicate = 2;
+  bool judge_queued = 3;
+}
+
+message Verdict {
+  string source = 1;
+  bool flagged = 2;
+  repeated Claim claims = 3;
+  int64 latency_us = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message Turn {
+  int32 turn = 1;
+  string text = 2;
+  int32 evidence_count = 3;
+  repeated Verdict verdicts = 4;
+}
+
+message Run {
+  string id = 1;
+  RunInfo info = 2;
+  int32 turns = 3;
+  int32 flagged = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message GetRunRequest {
+  string run_id = 1;
+}
+
+message GetRunResponse {
+  Run run = 1;
+  repeated Turn turns = 2;
+}
+
+message ListRunsRequest {
+  int32 limit = 1;
+  string before = 2;
+}
+
+message ListRunsResponse {
+  repeated Run runs = 1;
+  string next = 2;
+}

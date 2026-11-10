@@ -1,4 +1,4 @@
-package main
+package checker
 
 type Evidence struct {
 	Ref        string                 `json:"ref"`
