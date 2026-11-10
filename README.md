@@ -12,6 +12,9 @@ The agent runs `npm test`. It exits 1 with two failing tests. The agent replies
 That check is deterministic, takes about a millisecond, and costs nothing: no
 second model call.
 
+Try the checker and replay recorded swarms in the browser at
+[ledger-psi-umber-17.vercel.app/playground.html](https://ledger-psi-umber-17.vercel.app/playground.html).
+
 ```bash
 git clone https://github.com/iammdzaidalam/ledger && cd ledger
 npm install && npm run build && npm link

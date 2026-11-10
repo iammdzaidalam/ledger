@@ -3,3 +3,5 @@ shots/
 .ssr/
 public/ledger.wasm
 public/wasm_exec.js
+.vercel/
+.vercel

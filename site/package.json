@@ -9,7 +9,8 @@
 		"dev": "npm run wasm && vite",
 		"build": "npm run wasm && tsc --noEmit && vite build && vite build --ssr src/render.tsx --outDir .ssr --emptyOutDir && node scripts/prerender.mjs",
 		"preview": "vite preview",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"deploy:vercel": "npm run build && node scripts/vercel-output.mjs && vercel deploy --prebuilt --prod"
 	},
 	"dependencies": {
 		"react": "^19.1.0",
