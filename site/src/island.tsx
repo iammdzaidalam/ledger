@@ -1,28 +1,20 @@
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { Page } from "./page/Page";
+import { HeroDemo } from "./page/HeroDemo";
 import { ReplayApp } from "./page/ReplayApp";
+import { readInitial } from "./lib/sandbox";
+import "./copy";
 import "./page.css";
+import "./app.css";
 
-const island = document.getElementById("replay-island");
-if (island) {
-	hydrateRoot(island, <ReplayApp />);
+const initial = readInitial();
+
+if (document.getElementById("hero-island")?.hasChildNodes()) {
+	const hero = document.getElementById("hero-island");
+	if (hero) hydrateRoot(hero, <HeroDemo initial={initial} />, { identifierPrefix: "hd" });
+	const replay = document.getElementById("replay-island");
+	if (replay) hydrateRoot(replay, <ReplayApp />);
 } else {
 	const root = document.getElementById("page");
-	if (root) createRoot(root).render(<Page />);
+	if (root) createRoot(root).render(<Page html={{ initial }} />);
 }
-
-document.addEventListener("click", (event) => {
-	const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-copy]");
-	if (!button) return;
-	const text = button.dataset.copy ?? "";
-	const label = button.textContent;
-	navigator.clipboard
-		.writeText(text)
-		.then(() => {
-			button.textContent = "Copied";
-			window.setTimeout(() => {
-				button.textContent = label;
-			}, 1600);
-		})
-		.catch(() => undefined);
-});

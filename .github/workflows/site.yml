@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "checker/**"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -30,6 +31,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: site/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
       - run: npm ci
       - run: npm run build
       - uses: actions/configure-pages@v5

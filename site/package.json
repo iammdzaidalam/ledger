@@ -5,8 +5,9 @@
 	"type": "module",
 	"scripts": {
 		"data": "node scripts/extract-traces.mjs",
-		"dev": "vite",
-		"build": "tsc --noEmit && vite build && vite build --ssr src/render.tsx --outDir .ssr --emptyOutDir && node scripts/prerender.mjs",
+		"wasm": "node scripts/build-wasm.mjs",
+		"dev": "npm run wasm && vite",
+		"build": "npm run wasm && tsc --noEmit && vite build && vite build --ssr src/render.tsx --outDir .ssr --emptyOutDir && node scripts/prerender.mjs",
 		"preview": "vite preview",
 		"typecheck": "tsc --noEmit"
 	},

@@ -1,0 +1,97 @@
+{
+	"swarms": 36,
+	"tasksPerArm": 54,
+	"model": "qwen2.5:7b",
+	"bug": {
+		"on": {
+			"swarms": 18,
+			"tasks": 45,
+			"verified": {
+				"n": 12,
+				"pct": 27,
+				"lo": 16,
+				"hi": 41
+			},
+			"stillFailing": {
+				"n": 21,
+				"of": 33,
+				"pct": 64
+			},
+			"blocked": 0,
+			"failed": 12,
+			"attempts": "1.56",
+			"wallMin": "4.3"
+		},
+		"off": {
+			"swarms": 18,
+			"tasks": 45,
+			"verified": {
+				"n": 9,
+				"pct": 20,
+				"lo": 11,
+				"hi": 34
+			},
+			"stillFailing": {
+				"n": 15,
+				"of": 24,
+				"pct": 63
+			},
+			"blocked": 0,
+			"failed": 21,
+			"attempts": "1.00",
+			"wallMin": "2.2"
+		}
+	},
+	"control": {
+		"on": {
+			"swarms": 18,
+			"tasks": 9,
+			"verified": {
+				"n": 7,
+				"pct": 78,
+				"lo": 45,
+				"hi": 94
+			},
+			"stillFailing": {
+				"n": 0,
+				"of": 7,
+				"pct": 0
+			},
+			"blocked": 0,
+			"failed": 2,
+			"attempts": "1.67",
+			"wallMin": "4.3"
+		},
+		"off": {
+			"swarms": 18,
+			"tasks": 9,
+			"verified": {
+				"n": 3,
+				"pct": 33,
+				"lo": 12,
+				"hi": 65
+			},
+			"stillFailing": {
+				"n": 0,
+				"of": 3,
+				"pct": 0
+			},
+			"blocked": 0,
+			"failed": 6,
+			"attempts": "1.00",
+			"wallMin": "2.2"
+		}
+	},
+	"retries": 32,
+	"failures": 14,
+	"check": {
+		"rate": "21-25k/s",
+		"p50": "1.0 ms",
+		"clients": 32
+	},
+	"recordTurn": {
+		"rate": "3.9k/s",
+		"p50": "7.9 ms",
+		"clients": 32
+	}
+}

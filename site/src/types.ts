@@ -83,3 +83,62 @@ export interface EvalData {
 	temperature: number;
 	flags: Flag[];
 }
+
+export interface FleetArm {
+	swarms: number;
+	tasks: number;
+	verified: { n: number; pct: number; lo: number; hi: number };
+	stillFailing: { n: number; of: number; pct: number };
+	blocked: number;
+	failed: number;
+	attempts: string;
+	wallMin: string;
+}
+
+export interface FleetData {
+	swarms: number;
+	tasksPerArm: number;
+	model: string;
+	bug: { on: FleetArm; off: FleetArm };
+	control: { on: FleetArm; off: FleetArm };
+	retries: number;
+	failures: number;
+	check: { rate: string; p50: string; clients: number };
+	recordTurn: { rate: string; p50: string; clients: number };
+}
+
+export interface SwarmEvent {
+	at: number;
+	order: number;
+	type: string;
+	task: number | null;
+	attempt: number | null;
+	message: string;
+	data: Record<string, unknown>;
+}
+
+export interface SwarmTask {
+	idx: number;
+	scenario: string;
+	prompt: string;
+	state: string;
+	attempts: number;
+	verifyPassed: boolean;
+	branch: string;
+	commit: string;
+	doneAt: number;
+}
+
+export interface Swarm {
+	id: string;
+	short: string;
+	group: string;
+	seed: number;
+	gate: boolean;
+	model: string;
+	goal: string;
+	maxAttempts: number;
+	seconds: number;
+	tasks: SwarmTask[];
+	events: SwarmEvent[];
+}

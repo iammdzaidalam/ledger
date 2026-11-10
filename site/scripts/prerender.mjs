@@ -1,60 +1,52 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { appHead, head, scripts } from "./kit.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = resolve(here, "..");
 const dist = join(site, "dist");
 const ssr = join(site, ".ssr");
 
-const head = `<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Funnel+Display:wght@400..700&family=Funnel+Sans:wght@400..600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/system.css">
-<link rel="stylesheet" href="assets/ui/cards.css">
-<link rel="stylesheet" href="assets/motion/motion.css">
-<link rel="stylesheet" href="assets/backgrounds/backgrounds.css">
-<link rel="stylesheet" href="assets/layout/layout.css">
-<link rel="stylesheet" href="assets/icons/icon.css">
-<style>
-:root {
-  --p-bg: #f4f1ea; --p-surface: #b9d3cd; --p-ink: #141a19; --p-muted: #4a4e4b;
-  --p-accent: #f24900; --p-accent-ink: #111111; --p-action: #f24900; --p-action-ink: #111111;
-  --p-inv-bg: #141a19; --p-inv-surface: #212625; --p-inv-ink: #f4f1ea; --p-inv-muted: #969793;
-  --p-inv-accent: #f24900; --p-inv-accent-ink: #111111; --p-inv-action: #f24900; --p-inv-action-ink: #111111;
-  --font-display: "Funnel Display", system-ui, sans-serif;
-  --font-text: "Funnel Sans", system-ui, sans-serif;
-  --font-mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  --display-weight: 400;
-  --display-tracking: -0.03em;
-  --display-tracking-xl: -0.04em;
-  --ly-scale: 0.98;
-}
-</style>
-<link rel="stylesheet" href="assets/ui/base.css">
-<script>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
-<script src="assets/backgrounds/backgrounds.js"></script>
-<script>document.documentElement.classList.add('mo-js');setTimeout(()=>document.documentElement.classList.add('mo-safe'),2500)</script>
-<link rel="modulepreload" href="assets/moments/moments.js">
-<link rel="modulepreload" href="assets/moments/lib.js">
-<link rel="modulepreload" href="assets/moments/liquid-type/moment.js">`;
-
-const scripts = `<script type="module" src="assets/system.js"></script>
-<script type="module" src="assets/motion/motion.js"></script>
-<script type="module" src="assets/layout/layout.js"></script>`;
+createRequire(import.meta.url)(join(site, "public", "wasm_exec.js"));
+const go = new globalThis.Go();
+const { instance } = await WebAssembly.instantiate(readFileSync(join(site, "public", "ledger.wasm")), go.importObject);
+void go.run(instance);
+for (let i = 0; i < 200 && !globalThis.ledgerCheck; i++) await new Promise((r) => setTimeout(r, 10));
+if (!globalThis.ledgerCheck) throw new Error("the checker did not start in node");
 
 const { render } = await import(pathToFileURL(join(ssr, "render.js")).href);
-const file = join(dist, "index.html");
-let html = readFileSync(file, "utf8");
-const page = render();
-const built = html.match(/<script type="module" crossorigin src="[^"]+"><\/script>/);
-const css = html.match(/<link rel="stylesheet" crossorigin href="[^"]+">/);
-if (!built || !css) throw new Error("vite output not found in dist/index.html");
-html = html.replace(built[0], "").replace(css[0], "");
-html = html.replace("<!--kit-head-->", `${head}\n${css[0]}`);
-html = html.replace('<div id="page"><!--page--></div>', page);
-html = html.replace("<!--kit-scripts-->", `${built[0]}\n${scripts}`);
-if (!html.includes('id="replay-island"')) throw new Error("page did not render");
-writeFileSync(file, html);
+const { pages, initial } = render();
+for (const preset of JSON.parse(readFileSync(join(site, "src", "data", "sandbox.json"), "utf8"))) {
+	if (preset.recorded.length === 0) continue;
+	const got = initial[preset.id].claims.map((c) => `${c.kind}:${c.verdict}`).join(",");
+	const want = preset.recorded.map((c) => `${c.kind}:${c.verdict}`).join(",");
+	if (got !== want) throw new Error(`the checker no longer reproduces the recorded verdicts of ${preset.id}: ${got} against ${want}`);
+}
+const payload = JSON.stringify(initial).replace(/</g, "\\u003c");
+const required = {
+	"index.html": ["hero-island", "replay-island"],
+	"playground.html": [],
+};
+for (const [name, page] of Object.entries(pages)) {
+	const file = join(dist, name);
+	let html = readFileSync(file, "utf8");
+	const built = [...html.matchAll(/<script type="module" crossorigin src="[^"]+"><\/script>/g)].map((m) => m[0]);
+	const preloads = [...html.matchAll(/<link rel="modulepreload" crossorigin href="[^"]+">/g)].map((m) => m[0]);
+	const css = [...html.matchAll(/<link rel="stylesheet" crossorigin href="[^"]+">/g)].map((m) => m[0]);
+	if (built.length === 0 || css.length === 0) throw new Error(`vite output not found in dist/${name}`);
+	for (const tag of [...built, ...preloads, ...css]) html = html.replace(tag, "");
+	const links = `${css.map((c) => c.replace(" crossorigin", "")).join("\n")}\n${preloads.join("\n")}`;
+	html = html.replace("<!--kit-head-->", `${head}\n${links}`).replace("<!--app-head-->", `${appHead}\n${links}`);
+	html = html.replace('<div id="page"><!--page--></div>', `${page}\n<script type="application/json" id="ledger-initial">${payload}</script>`).replace('<div id="app" class="wrap"><!--page--></div>', `<div id="app" class="wrap"></div>\n${page}\n<script type="application/json" id="ledger-initial">${payload}</script>`);
+	html = html.includes("<!--kit-scripts-->") ? html.replace("<!--kit-scripts-->", `${built.join("\n")}\n${scripts}`) : html.replace("</body>", `${built.join("\n")}\n</body>`);
+	for (const id of [...required[name], "ledger-initial"]) {
+		if (!html.includes(`id="${id}"`)) throw new Error(`${name} did not render ${id}`);
+	}
+	writeFileSync(file, html);
+	process.stdout.write(`prerendered dist/${name} (${html.length} bytes)\n`);
+}
 rmSync(ssr, { recursive: true, force: true });
-process.stdout.write(`prerendered dist/index.html (${html.length} bytes)\n`);
+process.exit(0);

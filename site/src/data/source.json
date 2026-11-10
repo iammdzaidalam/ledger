@@ -1,0 +1,411 @@
+{
+	"evidence": {
+		"file": "checker/protocol.go",
+		"line": 3,
+		"lines": [
+			"type Evidence struct {",
+			"    Ref        string                 `json:\"ref\"`",
+			"    Seq        int                    `json:\"seq\"`",
+			"    Tool       string                 `json:\"tool\"`",
+			"    Args       map[string]interface{} `json:\"args\"`",
+			"    RawStdout  string                 `json:\"raw_stdout\"`",
+			"    RawStderr  string                 `json:\"raw_stderr\"`",
+			"    ExitCode   *int                   `json:\"exit_code\"`",
+			"    Executed   bool                   `json:\"executed\"`",
+			"    IsError    bool                   `json:\"is_error\"`",
+			"    DurationMs int64                  `json:\"duration_ms\"`",
+			"    Diff       string                 `json:\"diff,omitempty\"`"
+		]
+	},
+	"split": {
+		"file": "checker/claims.go",
+		"line": 48,
+		"lines": [
+			"func ExtractClaims(turn string) []Claim {",
+			"    text := fencedCode.ReplaceAllString(turn, \" \")",
+			"    var claims []Claim",
+			"    for _, m := range claimTag.FindAllStringSubmatch(text, -1) {",
+			"        for _, c := range classify(strings.TrimSpace(m[2]), true) {",
+			"            c.Ref = m[1]",
+			"            claims = append(claims, c)",
+			"        }",
+			"    }",
+			"    prose := claimTag.ReplaceAllString(text, \" \")",
+			"    for _, sentence := range splitSentences(prose) {",
+			"        claims = append(claims, classify(sentence, false)...)"
+		]
+	},
+	"evaluate": {
+		"file": "checker/rules.go",
+		"line": 21,
+		"lines": [
+			"func Evaluate(req CheckRequest) CheckResponse {",
+			"    resp := CheckResponse{RequestID: req.RequestID, Claims: []ClaimResult{}}",
+			"    seen := map[string]bool{}",
+			"    for _, c := range ExtractClaims(req.TurnText) {",
+			"        key := string(c.Kind) + \"\\x00\" + c.Text",
+			"        if seen[key] {",
+			"            continue",
+			"        }",
+			"        seen[key] = true",
+			"",
+			"        target, how := attribute(c, req)",
+			"        if c.Kind == KindSuccess && how == ByNone {"
+		]
+	},
+	"attribute": {
+		"file": "checker/rules.go",
+		"line": 54,
+		"lines": [
+			"func attribute(c Claim, req CheckRequest) (Evidence, Attribution) {",
+			"    if c.Ref != \"\" {",
+			"        e, ok := ByRef(req.Evidence, c.Ref)",
+			"        if !ok {",
+			"            return Evidence{}, ByNone",
+			"        }",
+			"        if fits(c, e) {",
+			"            return e, ByTag",
+			"        }",
+			"    }",
+			"    if e, ok := mentioned(c, req.Evidence); ok {",
+			"        return e, ByMention"
+		]
+	},
+	"tests_pass": {
+		"file": "checker/rule_tests_pass.go",
+		"line": 27,
+		"lines": [
+			"func checkTestsPass(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {",
+			"    if !found {",
+			"        return Unsupported, \"no test command was run\"",
+			"    }",
+			"    summary := ParseTestSummary(OutputOf(target))",
+			"    counts := \"\"",
+			"    if summary.Found {",
+			"        counts = fmt.Sprintf(\" (%s: %d passed, %d failed)\", summary.Runner, summary.Passed, summary.Failed)",
+			"    }",
+			"    if summary.Found && summary.Passed > 0 && summary.Failed > 0 && excludes.MatchString(c.Text) {",
+			"        return Unverifiable, Describe(target) + \" and the claim leaves some tests out\" + counts",
+			"    }"
+		]
+	},
+	"lint_clean": {
+		"file": "checker/rule_lint_clean.go",
+		"line": 13,
+		"lines": [
+			"func checkLintClean(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {",
+			"    if !found {",
+			"        return Unsupported, \"no linter was run\"",
+			"    }",
+			"    if !Succeeded(target) {",
+			"        return Contradicted, Describe(target)",
+			"    }",
+			"    out := strings.TrimSpace(OutputOf(target))",
+			"    if strings.Contains(CommandOf(target), \"gofmt -l\") && out != \"\" {",
+			"        return Contradicted, \"gofmt -l listed unformatted files: \" + firstLine(out)",
+			"    }",
+			"    if noWarnings.MatchString(c.Text) && lintProblems.MatchString(out) {"
+		]
+	},
+	"file_created": {
+		"file": "checker/rule_file_created.go",
+		"line": 5,
+		"lines": [
+			"func checkFileCreated(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {",
+			"    if !found {",
+			"        if c.Path != \"\" {",
+			"            return Unsupported, \"nothing wrote \" + c.Path",
+			"        }",
+			"        return Unsupported, \"no Write call in this session\"",
+			"    }",
+			"    if c.Path != \"\" && !writes(c, target) {",
+			"        return Unsupported, \"nothing wrote \" + c.Path + \", last write was \" + PathOf(target)",
+			"    }",
+			"    if !Succeeded(target) {",
+			"        reason := Describe(target)"
+		]
+	},
+	"bug_fixed": {
+		"file": "checker/rule_bug_fixed.go",
+		"line": 3,
+		"lines": [
+			"func checkBugFixed(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {",
+			"    change, ok := lastFix(req.Evidence)",
+			"    if !ok {",
+			"        return Unsupported, \"no file was changed\"",
+			"    }",
+			"    failedBefore := map[string]bool{}",
+			"    for _, e := range req.Evidence {",
+			"        if IsCommand(e) && e.Seq < change.Seq && !Succeeded(e) {",
+			"            failedBefore[CommandOf(e)] = true",
+			"        }",
+			"    }",
+			"    after := func(e Evidence) bool { return IsCommand(e) && e.Seq > change.Seq }"
+		]
+	},
+	"command_success": {
+		"file": "checker/rule_command_success.go",
+		"line": 3,
+		"lines": [
+			"func checkCommandSuccess(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {",
+			"    if Succeeded(target) {",
+			"        return Verified, Describe(target)",
+			"    }",
+			"    return Contradicted, Describe(target)",
+			"}",
+			""
+		]
+	},
+	"not_executed": {
+		"file": "checker/rules.go",
+		"line": 151,
+		"lines": [
+			"func checkExecuted(target Evidence, found bool) (Verdict, string) {",
+			"    if !found {",
+			"        return \"\", \"\"",
+			"    }",
+			"    if !target.Executed {",
+			"        return Contradicted, Describe(target) + \", so nothing it claims about can have happened\"",
+			"    }",
+			"    if IsCommand(target) && target.ExitCode == nil {",
+			"        return Contradicted, Describe(target) + \" before finishing\"",
+			"    }",
+			"    return \"\", \"\"",
+			"}"
+		]
+	},
+	"decide": {
+		"file": "server/internal/orch/gate.go",
+		"line": 27,
+		"lines": [
+			"func Decide(in GateInput) GateResult {",
+			"    if !in.Gate {",
+			"        if in.Commit != \"\" {",
+			"            return GateResult{ledgerv1.GateDecision_GATE_DECISION_PASS, \"gate is off\"}",
+			"        }",
+			"        return GateResult{ledgerv1.GateDecision_GATE_DECISION_FAIL, fmt.Sprintf(\"exit code %d and nothing to merge\", in.ExitCode)}",
+			"    }",
+			"    if in.Error != \"\" {",
+			"        return GateResult{ledgerv1.GateDecision_GATE_DECISION_FAIL, \"worker error: \" + in.Error}",
+			"    }",
+			"    if in.Commit == \"\" || in.Branch == \"\" {",
+			"        if in.Attempt < in.MaxAttempts {"
+		]
+	},
+	"feedback": {
+		"file": "server/internal/orch/gate.go",
+		"line": 59,
+		"lines": [
+			"func Feedback(claims []checker.ClaimResult) string {",
+			"    var b strings.Builder",
+			"    flagged := 0",
+			"    b.WriteString(\"The checker flagged your last turn.\\n\")",
+			"    for _, c := range claims {",
+			"        if c.Verdict != checker.Contradicted && c.Verdict != checker.Unsupported {",
+			"            continue",
+			"        }",
+			"        flagged++",
+			"        fmt.Fprintf(&b, \"- %q (%s) is %s: %s\\n\", c.Text, c.Kind, c.Verdict, c.Reason)",
+			"    }",
+			"    if flagged == 0 {"
+		]
+	},
+	"create": {
+		"file": "server/internal/orch/create.go",
+		"line": 14,
+		"lines": [
+			"func (s *Service) CreateSwarm(ctx context.Context, req *connect.Request[ledgerv1.CreateSwarmRequest]) (*connect.Response[ledgerv1.CreateSwarmResponse], error) {",
+			"    m := req.Msg",
+			"    if len(m.Subtasks) == 0 || len(m.Subtasks) > maxSubtasks {",
+			"        return nil, invalid(\"subtasks must have 1-%d entries\", maxSubtasks)",
+			"    }",
+			"    for i, st := range m.Subtasks {",
+			"        if strings.TrimSpace(st.Prompt) == \"\" {",
+			"            return nil, invalid(\"subtasks[%d]: prompt is required\", i)",
+			"        }",
+			"    }",
+			"    attempts := int(m.MaxAttempts)",
+			"    if attempts <= 0 {"
+		]
+	},
+	"planner": {
+		"file": "src/swarm/planner.ts",
+		"line": 105,
+		"lines": [
+			"export async function planSubtasks(options: PlanOptions): Promise<SubtaskSpec[]> {",
+			"    if (options.max <= 1) return singleSubtask(options.goal);",
+			"    let text = \"\";",
+			"    try {",
+			"        for await (const event of options.provider.complete({",
+			"            model: options.model,",
+			"            system: plannerSystem(options.max),",
+			"            messages: [{ role: \"user\", content: plannerMessage(options.goal, options.files) }],",
+			"            tools: [],",
+			"            max_tokens: 1500,",
+			"            temperature: 0,",
+			"            signal: options.signal,"
+		]
+	},
+	"claim": {
+		"file": "server/internal/orch/claim.go",
+		"line": 20,
+		"lines": [
+			"func (s *Service) ClaimAttempt(ctx context.Context, req *connect.Request[ledgerv1.ClaimAttemptRequest]) (*connect.Response[ledgerv1.ClaimAttemptResponse], error) {",
+			"    m := req.Msg",
+			"    if m.WorkerId == \"\" {",
+			"        return nil, invalid(\"worker_id is required\")",
+			"    }",
+			"    lease := clampLease(m.LeaseSeconds)",
+			"    if _, err := s.reapExpired(ctx, m.SwarmId); err != nil {",
+			"        s.log().Warn(\"reap before claim\", \"err\", err)",
+			"    }",
+			"",
+			"    var assignment *ledgerv1.Assignment",
+			"    err := s.tx(ctx, \"claim_attempt\", func(ctx context.Context, tx pgx.Tx, out *outbox) error {"
+		]
+	},
+	"heartbeat": {
+		"file": "server/internal/orch/claim.go",
+		"line": 85,
+		"lines": [
+			"func (s *Service) Heartbeat(ctx context.Context, req *connect.Request[ledgerv1.HeartbeatRequest]) (*connect.Response[ledgerv1.HeartbeatResponse], error) {",
+			"    m := req.Msg",
+			"    if m.AttemptId == \"\" || m.WorkerId == \"\" {",
+			"        return nil, invalid(\"attempt_id and worker_id are required\")",
+			"    }",
+			"    tag, err := s.DB.Exec(ctx, `",
+			"        update attempts set leased_until = now() + make_interval(secs => lease_seconds)",
+			"        where id = $1 and worker_id = $2 and state = 'running'`, m.AttemptId, m.WorkerId)",
+			"    if err != nil {",
+			"        return nil, asConnect(err)",
+			"    }",
+			"    if tag.RowsAffected() == 1 {"
+		]
+	},
+	"record": {
+		"file": "server/internal/verify/service.go",
+		"line": 78,
+		"lines": [
+			"func (s *Service) RecordTurn(ctx context.Context, req *connect.Request[ledgerv1.RecordTurnRequest]) (*connect.Response[ledgerv1.RecordTurnResponse], error) {",
+			"    m := req.Msg",
+			"    if m.RunId == \"\" || len(m.RunId) > maxRunID {",
+			"        return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf(\"run_id must be 1-%d characters\", maxRunID))",
+			"    }",
+			"    if m.Turn < 1 {",
+			"        return nil, connect.NewError(connect.CodeInvalidArgument, errors.New(\"turn starts at 1\"))",
+			"    }",
+			"    evidence, err := FromProto(m.Evidence)",
+			"    if err != nil {",
+			"        return nil, connect.NewError(connect.CodeInvalidArgument, err)",
+			"    }"
+		]
+	},
+	"complete": {
+		"file": "server/internal/orch/complete.go",
+		"line": 60,
+		"lines": [
+			"func (s *Service) CompleteAttempt(ctx context.Context, req *connect.Request[ledgerv1.CompleteAttemptRequest]) (*connect.Response[ledgerv1.CompleteAttemptResponse], error) {",
+			"    m := req.Msg",
+			"    if m.AttemptId == \"\" || m.WorkerId == \"\" {",
+			"        return nil, invalid(\"attempt_id and worker_id are required\")",
+			"    }",
+			"    swarmID, taskID, ok, err := store.AttemptOwner(ctx, s.DB, m.AttemptId)",
+			"    if err != nil {",
+			"        return nil, asConnect(err)",
+			"    }",
+			"    if !ok {",
+			"        return nil, notFound(\"no attempt %q\", m.AttemptId)",
+			"    }"
+		]
+	},
+	"apply": {
+		"file": "server/internal/orch/complete.go",
+		"line": 144,
+		"lines": [
+			"func (s *Service) apply(ctx context.Context, tx pgx.Tx, out *outbox, p applyArgs) error {",
+			"    name := decisionName(p.result.Decision)",
+			"    _, err := tx.Exec(ctx, `",
+			"        update attempts set state = 'done', decision = $2, reason = $3, branch = $4, commit_sha = $5, exit_code = $6,",
+			"            flagged_turns = $7, turns = $8, summary = $9, error = $10, finished_at = now()",
+			"        where id = $1`,",
+			"        p.attemptID, name, p.result.Reason, p.req.Branch, p.req.Commit, p.req.ExitCode,",
+			"        p.stats.Flagged, p.stats.Turns, p.req.Summary, p.req.Error)",
+			"    if err != nil {",
+			"        return err",
+			"    }",
+			""
+		]
+	},
+	"withFeedback": {
+		"file": "src/swarm/worker.ts",
+		"line": 38,
+		"lines": [
+			"export function withFeedback(prompt: string, feedback: string | undefined): string {",
+			"    if (!feedback) return prompt;",
+			"    return `Your previous attempt made claims the recorded tool evidence does not support: ${feedback}\\n\\n${prompt}`;",
+			"}",
+			"",
+			"const UNVERIFIED_EXIT = 2;",
+			"const SUMMARY_CHARS = 1000;",
+			"",
+			"export class Worker {",
+			"    private readonly indexes = new Map<string, number>();",
+			"    private readonly pollMs: number;",
+			"    private readonly log: (line: string) => void;"
+		]
+	},
+	"claimMerge": {
+		"file": "server/internal/orch/merge.go",
+		"line": 14,
+		"lines": [
+			"func (s *Service) ClaimMerge(ctx context.Context, req *connect.Request[ledgerv1.ClaimMergeRequest]) (*connect.Response[ledgerv1.ClaimMergeResponse], error) {",
+			"    m := req.Msg",
+			"    if m.SwarmId == \"\" || m.WorkerId == \"\" {",
+			"        return nil, invalid(\"swarm_id and worker_id are required\")",
+			"    }",
+			"    lease := clampLease(m.LeaseSeconds)",
+			"    resp := &ledgerv1.ClaimMergeResponse{}",
+			"    err := s.tx(ctx, \"claim_merge\", func(ctx context.Context, tx pgx.Tx, out *outbox) error {",
+			"        resp = &ledgerv1.ClaimMergeResponse{}",
+			"        sw, ok, err := lockSwarm(ctx, tx, m.SwarmId, false)",
+			"        if err != nil {",
+			"            return err"
+		]
+	},
+	"finishMerge": {
+		"file": "server/internal/orch/merge.go",
+		"line": 96,
+		"lines": [
+			"func (s *Service) FinishMerge(ctx context.Context, req *connect.Request[ledgerv1.FinishMergeRequest]) (*connect.Response[ledgerv1.FinishMergeResponse], error) {",
+			"    m := req.Msg",
+			"    if m.TaskId == \"\" || m.WorkerId == \"\" {",
+			"        return nil, invalid(\"task_id and worker_id are required\")",
+			"    }",
+			"    var swarmID string",
+			"    err := s.DB.QueryRow(ctx, `select swarm_id from tasks where id = $1`, m.TaskId).Scan(&swarmID)",
+			"    if errors.Is(err, pgx.ErrNoRows) {",
+			"        return nil, notFound(\"no task %q\", m.TaskId)",
+			"    }",
+			"    if err != nil {",
+			"        return nil, asConnect(err)"
+		]
+	},
+	"events": {
+		"file": "server/internal/events/event.go",
+		"line": 9,
+		"lines": [
+			"const (",
+			"    SwarmCreated  = \"swarm.created\"",
+			"    TaskQueued    = \"task.queued\"",
+			"    TaskClaimed   = \"task.claimed\"",
+			"    HeartbeatLost = \"task.heartbeat_lost\"",
+			"    AttemptTurn   = \"attempt.turn\"",
+			"    AttemptDone   = \"attempt.completed\"",
+			"    GatePass      = \"gate.pass\"",
+			"    GateRetry     = \"gate.retry\"",
+			"    GateBlock     = \"gate.block\"",
+			"    GateFail      = \"gate.fail\"",
+			"    TaskMerging   = \"task.merging\""
+		]
+	}
+}
