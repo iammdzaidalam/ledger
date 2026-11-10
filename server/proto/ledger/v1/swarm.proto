@@ -1,0 +1,243 @@
+syntax = "proto3";
+
+package ledger.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/iammdzaidalam/ledger/server/gen/ledger/v1;ledgerv1";
+
+// SwarmService runs one coding task as several parallel subtasks. Workers pull
+// attempts, record turns through VerifyService.RecordTurn under the attempt's
+// run_id, and report the result. The server decides whether an attempt may be
+// merged, retried with feedback, or blocked, based on the checker's verdicts.
+service SwarmService {
+  rpc CreateSwarm(CreateSwarmRequest) returns (CreateSwarmResponse);
+  rpc GetSwarm(GetSwarmRequest) returns (GetSwarmResponse);
+  rpc ListSwarms(ListSwarmsRequest) returns (ListSwarmsResponse);
+  rpc CancelSwarm(CancelSwarmRequest) returns (CancelSwarmResponse);
+
+  rpc ClaimAttempt(ClaimAttemptRequest) returns (ClaimAttemptResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc CompleteAttempt(CompleteAttemptRequest) returns (CompleteAttemptResponse);
+
+  rpc ClaimMerge(ClaimMergeRequest) returns (ClaimMergeResponse);
+  rpc FinishMerge(FinishMergeRequest) returns (FinishMergeResponse);
+
+  rpc StreamEvents(StreamEventsRequest) returns (stream SwarmEvent);
+}
+
+enum SwarmState {
+  SWARM_STATE_UNSPECIFIED = 0;
+  SWARM_STATE_RUNNING = 1;
+  SWARM_STATE_DONE = 2;
+  SWARM_STATE_CANCELLED = 3;
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_QUEUED = 1;
+  TASK_STATE_RUNNING = 2;
+  TASK_STATE_PASSED = 3;
+  TASK_STATE_MERGING = 4;
+  TASK_STATE_MERGED = 5;
+  TASK_STATE_CONFLICT = 6;
+  TASK_STATE_BLOCKED = 7;
+  TASK_STATE_FAILED = 8;
+  TASK_STATE_CANCELLED = 9;
+}
+
+enum GateDecision {
+  GATE_DECISION_UNSPECIFIED = 0;
+  GATE_DECISION_PASS = 1;
+  GATE_DECISION_RETRY = 2;
+  GATE_DECISION_BLOCK = 3;
+  GATE_DECISION_FAIL = 4;
+}
+
+message SubtaskSpec {
+  string title = 1;
+  string prompt = 2;
+}
+
+message CreateSwarmRequest {
+  string idempotency_key = 1;
+  string goal = 2;
+  repeated SubtaskSpec subtasks = 3;
+  string repo = 4;
+  string base_ref = 5;
+  string model = 6;
+  bool gate = 7;
+  int32 max_attempts = 8;
+}
+
+message CreateSwarmResponse {
+  Swarm swarm = 1;
+  bool duplicate = 2;
+}
+
+message Attempt {
+  string id = 1;
+  int32 number = 2;
+  string worker_id = 3;
+  string run_id = 4;
+  GateDecision decision = 5;
+  string feedback = 6;
+  string branch = 7;
+  string commit = 8;
+  int32 exit_code = 9;
+  int32 flagged_turns = 10;
+  int32 turns = 11;
+  google.protobuf.Timestamp started_at = 12;
+  google.protobuf.Timestamp finished_at = 13;
+}
+
+message Task {
+  string id = 1;
+  string swarm_id = 2;
+  int32 index = 3;
+  string title = 4;
+  string prompt = 5;
+  TaskState state = 6;
+  repeated Attempt attempts = 7;
+  string detail = 8;
+}
+
+message Swarm {
+  string id = 1;
+  string goal = 2;
+  string repo = 3;
+  string base_ref = 4;
+  string model = 5;
+  bool gate = 6;
+  int32 max_attempts = 7;
+  SwarmState state = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp finished_at = 10;
+  map<string, int32> task_counts = 11;
+}
+
+message GetSwarmRequest {
+  string swarm_id = 1;
+}
+
+message GetSwarmResponse {
+  Swarm swarm = 1;
+  repeated Task tasks = 2;
+}
+
+message ListSwarmsRequest {
+  int32 limit = 1;
+  string before = 2;
+}
+
+message ListSwarmsResponse {
+  repeated Swarm swarms = 1;
+  string next = 2;
+}
+
+message CancelSwarmRequest {
+  string swarm_id = 1;
+}
+
+message CancelSwarmResponse {
+  Swarm swarm = 1;
+}
+
+message Assignment {
+  string swarm_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  int32 attempt_number = 4;
+  string run_id = 5;
+  string title = 6;
+  string prompt = 7;
+  string feedback = 8;
+  string repo = 9;
+  string base_ref = 10;
+  string model = 11;
+  int32 lease_seconds = 12;
+  string branch = 13;
+}
+
+message ClaimAttemptRequest {
+  string worker_id = 1;
+  int32 lease_seconds = 2;
+  string swarm_id = 3;
+}
+
+message ClaimAttemptResponse {
+  Assignment assignment = 1;
+}
+
+message HeartbeatRequest {
+  string attempt_id = 1;
+  string worker_id = 2;
+}
+
+message HeartbeatResponse {
+  bool lease_held = 1;
+  bool cancelled = 2;
+}
+
+message CompleteAttemptRequest {
+  string attempt_id = 1;
+  string worker_id = 2;
+  int32 exit_code = 3;
+  string branch = 4;
+  string commit = 5;
+  repeated string files_changed = 6;
+  string summary = 7;
+  string error = 8;
+}
+
+message CompleteAttemptResponse {
+  GateDecision decision = 1;
+  string reason = 2;
+  int32 flagged_turns = 3;
+  int32 turns = 4;
+}
+
+message ClaimMergeRequest {
+  string swarm_id = 1;
+  string worker_id = 2;
+  int32 lease_seconds = 3;
+}
+
+message MergeJob {
+  string swarm_id = 1;
+  string task_id = 2;
+  string branch = 3;
+  string commit = 4;
+  string title = 5;
+  string repo = 6;
+}
+
+message ClaimMergeResponse {
+  MergeJob job = 1;
+  bool swarm_finished = 2;
+}
+
+message FinishMergeRequest {
+  string task_id = 1;
+  string worker_id = 2;
+  bool merged = 3;
+  string detail = 4;
+}
+
+message FinishMergeResponse {
+  Task task = 1;
+}
+
+message StreamEventsRequest {
+  string swarm_id = 1;
+}
+
+message SwarmEvent {
+  string swarm_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string type = 4;
+  string message = 5;
+  string data_json = 6;
+  google.protobuf.Timestamp at = 7;
+}

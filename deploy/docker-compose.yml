@@ -15,6 +15,24 @@ services:
       timeout: 3s
       retries: 20
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
   ledgerd:
     build:
       context: ..
@@ -22,8 +40,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     environment:
       LEDGER_DATABASE_URL: postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      LEDGER_REDIS_URL: redis://redis:6379
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       LEDGER_ADDR: ":8080"
       LEDGER_JUDGE_MODEL: ${LEDGER_JUDGE_MODEL:-}
       LEDGER_JUDGE_URL: ${LEDGER_JUDGE_URL:-http://host.docker.internal:11434/v1}

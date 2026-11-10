@@ -3,110 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ledger runs</title>
-<style>
-:root{--bg:#fbfaf7;--panel:#fff;--ink:#1d1c1a;--mute:#6f6b63;--line:#e4e0d6;--bad:#a8321f;--badbg:#f8e6e1;--good:#2f6b3f;--goodbg:#e4f0e6;--warn:#8a6414;--warnbg:#f6edd6;--accent:#2a4d8f}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--panel:#1e1d1b;--ink:#ecebe6;--mute:#9a968c;--line:#32302c;--bad:#f0937f;--badbg:#3a211c;--good:#8bc79a;--goodbg:#1f3024;--warn:#e0bd6a;--warnbg:#352c14;--accent:#8fb0f0}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-header{display:flex;align-items:baseline;gap:16px;padding:18px 24px;border-bottom:1px solid var(--line)}
-header h1{font-size:17px;margin:0;font-weight:650}
-header span{color:var(--mute);font-size:13px}
-main{display:grid;grid-template-columns:minmax(280px,360px) 1fr;min-height:calc(100vh - 62px)}
-#runs{border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 62px)}
-.run{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:12px 24px;color:inherit;font:inherit;cursor:pointer}
-.run:hover{background:var(--panel)}
-.run[aria-current=true]{background:var(--panel);box-shadow:inset 3px 0 var(--accent)}
-.run b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.run small{color:var(--mute);display:flex;gap:10px;margin-top:2px}
-.pill{display:inline-block;border-radius:99px;padding:0 8px;font-size:12px;line-height:20px;font-weight:600}
-.pill.bad{background:var(--badbg);color:var(--bad)}.pill.good{background:var(--goodbg);color:var(--good)}.pill.warn{background:var(--warnbg);color:var(--warn)}
-#detail{padding:20px 24px 48px;max-width:980px}
-#detail h2{margin:0 0 4px;font-size:18px}
-.meta{color:var(--mute);font-size:13px;margin-bottom:18px;display:flex;gap:14px;flex-wrap:wrap}
-.turn{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:0 0 12px;padding:12px 14px}
-.turn.flagged{border-color:var(--bad)}
-.turn h3{margin:0 0 6px;font-size:13px;color:var(--mute);font-weight:600;display:flex;gap:10px;align-items:center}
-.text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:9.5em;overflow:auto;font-size:14px}
-.claim{margin-top:8px;padding:8px 10px;border-radius:6px;font-size:13px}
-.claim.bad{background:var(--badbg)}.claim.good{background:var(--goodbg)}.claim.warn{background:var(--warnbg)}
-.claim code{font:12px ui-monospace,Menlo,monospace}
-.claim .why{color:var(--mute);display:block;margin-top:2px}
-.empty{padding:40px 24px;color:var(--mute)}
-@media (max-width:760px){main{grid-template-columns:1fr}#runs{max-height:240px;border-right:0;border-bottom:1px solid var(--line)}}
-</style>
+<meta name="color-scheme" content="light dark">
+<title>Ledger Fleet</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='%23888'%3E%3Ccircle cx='5' cy='5' r='2'/%3E%3Ccircle cx='12' cy='5' r='2'/%3E%3Ccircle cx='19' cy='5' r='2'/%3E%3Ccircle cx='5' cy='12' r='2'/%3E%3Ccircle cx='19' cy='12' r='2'/%3E%3Ccircle cx='5' cy='19' r='2'/%3E%3Ccircle cx='12' cy='19' r='2'/%3E%3Ccircle cx='19' cy='19' r='2'/%3E%3C/g%3E%3Ccircle cx='12' cy='12' r='2.6' fill='%231f5fd6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-<header><h1>Ledger runs</h1><span id="status">loading</span></header>
-<main>
-<nav id="runs" aria-label="Runs"></nav>
-<section id="detail"><p class="empty">Pick a run.</p></section>
-</main>
-<script>
-const base = "/ledger.v1.VerifyService/";
-async function call(method, body) {
-  const res = await fetch(base + method, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (!res.ok) throw new Error(method + " " + res.status);
-  return res.json();
-}
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-const tone = v => v === "verified" ? "good" : v === "unverifiable" ? "warn" : "bad";
-const ago = iso => { const s = Math.max(0, (Date.now() - new Date(iso)) / 1000); return s < 90 ? Math.round(s) + "s ago" : s < 5400 ? Math.round(s / 60) + "m ago" : s < 129600 ? Math.round(s / 3600) + "h ago" : Math.round(s / 86400) + "d ago"; };
-let current = null;
-
-async function loadRuns() {
-  const data = await call("ListRuns", {limit: 100});
-  const nav = document.getElementById("runs");
-  nav.replaceChildren();
-  const runs = data.runs || [];
-  document.getElementById("status").textContent = runs.length + " runs";
-  if (!runs.length) nav.append(el("p", "empty", "No runs yet. Start the CLI with --server."));
-  for (const r of runs) {
-    const b = el("button", "run");
-    b.type = "button";
-    b.setAttribute("aria-current", String(r.id === current));
-    b.append(el("b", "", r.info.task || r.id));
-    const small = el("small");
-    small.append(el("span", "", (r.turns || 0) + " turns"));
-    small.append(el("span", "pill " + (r.flagged ? "bad" : "good"), r.flagged ? r.flagged + " flagged" : "clean"));
-    small.append(el("span", "", ago(r.createdAt)));
-    b.append(small);
-    b.onclick = () => { current = r.id; loadRuns(); show(r.id); };
-    nav.append(b);
-  }
-}
-
-async function show(id) {
-  const data = await call("GetRun", {runId: id});
-  const box = document.getElementById("detail");
-  box.replaceChildren();
-  const run = data.run;
-  box.append(el("h2", "", run.info.task || run.id));
-  const meta = el("div", "meta");
-  for (const t of [run.id, run.info.model, run.info.source, (run.turns || 0) + " turns"]) if (t) meta.append(el("span", "", t));
-  box.append(meta);
-  for (const t of data.turns || []) {
-    const verdicts = t.verdicts || [];
-    const checker = verdicts.find(v => v.source === "checker");
-    const card = el("article", "turn" + (checker && checker.flagged ? " flagged" : ""));
-    const h = el("h3", "", "Turn " + t.turn);
-    h.append(el("span", "", (t.evidenceCount || 0) + " tool calls"));
-    for (const v of verdicts) if (v.source !== "checker") h.append(el("span", "pill " + (v.flagged ? "bad" : "good"), v.source + (v.flagged ? " flagged" : " clear")));
-    card.append(h, el("div", "text", t.text));
-    for (const v of verdicts) for (const c of v.claims || []) {
-      if (!c.verdict) continue;
-      const row = el("div", "claim " + tone(c.verdict));
-      row.append(el("code", "", c.kind + " · " + c.verdict + (v.source === "checker" ? "" : " · " + v.source)));
-      if (c.text) row.append(document.createTextNode(" " + c.text.slice(0, 160)));
-      if (c.reason) row.append(el("span", "why", c.reason));
-      card.append(row);
-    }
-    box.append(card);
-  }
-}
-
-loadRuns().catch(e => document.getElementById("status").textContent = e.message);
-setInterval(() => { loadRuns().catch(() => {}); if (current) show(current).catch(() => {}); }, 5000);
-</script>
+<a class="skip" href="#main">Skip to detail</a>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor" opacity="0.35"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/></g><circle cx="12" cy="12" r="2.6" fill="currentColor"/></svg>
+    <span>Ledger Fleet</span>
+    <span class="tag" id="demo-tag" hidden>demo</span>
+  </div>
+  <div class="grow"></div>
+  <button class="btn" id="replay" type="button" hidden>Replay</button>
+  <div class="conn" id="conn" role="status" data-s="connecting"><i></i><span>connecting</span></div>
+</header>
+<nav class="tabs" id="tabs" aria-label="Panels">
+  <button type="button" data-pane="list" aria-pressed="true">List</button>
+  <button type="button" data-pane="detail" aria-pressed="false">Detail</button>
+  <button type="button" data-pane="feed" aria-pressed="false">Feed</button>
+</nav>
+<div class="app" id="app" data-pane="list">
+  <aside class="pane rail" id="rail" aria-label="Swarms and runs">
+    <div class="rail-head">
+      <div class="seg" role="group" aria-label="List type">
+        <button type="button" id="m-swarms" aria-pressed="true">Swarms</button>
+        <button type="button" id="m-runs" aria-pressed="false">Runs</button>
+      </div>
+      <label class="sr" for="filter">Filter</label>
+      <input class="filter" id="filter" type="search" placeholder="Filter (press /)" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <main class="pane detail" id="main" tabindex="-1"></main>
+  <aside class="pane feedpane" id="feedpane" aria-label="Event feed">
+    <div class="feed-head">
+      <h2>Events</h2>
+      <div class="seg" role="group" aria-label="Feed scope">
+        <button type="button" id="scope-swarm" aria-pressed="true">This swarm</button>
+        <button type="button" id="scope-all" aria-pressed="false">All</button>
+      </div>
+      <button class="btn" id="pause" type="button" aria-pressed="false">Pause</button>
+    </div>
+    <ol class="feed" id="feed" aria-live="polite" aria-relevant="additions" aria-label="Events, newest first"></ol>
+  </aside>
+</div>
+<footer class="stats" id="stats" hidden></footer>
+<script src="demo.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

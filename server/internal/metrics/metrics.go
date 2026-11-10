@@ -13,16 +13,23 @@ import (
 )
 
 type Metrics struct {
-	Registry  *prometheus.Registry
-	RPC       *prometheus.HistogramVec
-	Check     prometheus.Histogram
-	Claims    *prometheus.CounterVec
-	Turns     *prometheus.CounterVec
-	Jobs      *prometheus.CounterVec
-	JobTime   *prometheus.HistogramVec
-	Breaker   prometheus.Gauge
-	queueDesc *prometheus.Desc
-	db        store.DB
+	Registry *prometheus.Registry
+	RPC      *prometheus.HistogramVec
+	Check    prometheus.Histogram
+	Claims   *prometheus.CounterVec
+	Turns    *prometheus.CounterVec
+	Jobs     *prometheus.CounterVec
+	JobTime  *prometheus.HistogramVec
+	Breaker  prometheus.Gauge
+
+	GateDecisions *prometheus.CounterVec
+	Attempts      *prometheus.CounterVec
+	AttemptTime   prometheus.Histogram
+	LeaseExpired  prometheus.Counter
+	EventsDropped prometheus.Counter
+	queueDesc     *prometheus.Desc
+	tasksDesc     *prometheus.Desc
+	db            store.DB
 }
 
 func New(db store.DB) *Metrics {
@@ -59,26 +66,55 @@ func New(db store.DB) *Metrics {
 			Name: "ledger_judge_breaker_state",
 			Help: "Judge circuit breaker: 0 closed, 1 open, 2 half open.",
 		}),
+		GateDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "ledger_gate_decisions_total",
+			Help: "Gate decisions by outcome: pass, retry, block or fail.",
+		}, []string{"decision"}),
+		Attempts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "ledger_attempts_total",
+			Help: "Finished attempts by outcome.",
+		}, []string{"outcome"}),
+		AttemptTime: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "ledger_attempt_duration_seconds",
+			Help:    "Time from claim to the end of an attempt.",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 12),
+		}),
+		LeaseExpired: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ledger_lease_expired_total",
+			Help: "Attempts closed because the worker stopped heartbeating.",
+		}),
+		EventsDropped: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ledger_events_dropped_total",
+			Help: "Events dropped for subscribers that fell behind.",
+		}),
 		queueDesc: prometheus.NewDesc("ledger_queue_jobs", "Jobs by kind and state.", []string{"kind", "state"}, nil),
+		tasksDesc: prometheus.NewDesc("ledger_tasks_total", "Fleet tasks by state.", []string{"state"}, nil),
 		db:        db,
 	}
-	m.Registry.MustRegister(m.RPC, m.Check, m.Claims, m.Turns, m.Jobs, m.JobTime, m.Breaker, m,
+	m.Registry.MustRegister(m.RPC, m.Check, m.Claims, m.Turns, m.Jobs, m.JobTime, m.Breaker,
+		m.GateDecisions, m.Attempts, m.AttemptTime, m.LeaseExpired, m.EventsDropped, m,
 		prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m
 }
 
-func (m *Metrics) Describe(ch chan<- *prometheus.Desc) { ch <- m.queueDesc }
+func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {
+	ch <- m.queueDesc
+	ch <- m.tasksDesc
+}
 
 func (m *Metrics) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	counts, err := queue.Depth(ctx, m.db)
-	if err != nil {
-		return
+	if counts, err := queue.Depth(ctx, m.db); err == nil {
+		for kind, states := range counts {
+			for state, n := range states {
+				ch <- prometheus.MustNewConstMetric(m.queueDesc, prometheus.GaugeValue, float64(n), kind, state)
+			}
+		}
 	}
-	for kind, states := range counts {
-		for state, n := range states {
-			ch <- prometheus.MustNewConstMetric(m.queueDesc, prometheus.GaugeValue, float64(n), kind, state)
+	if counts, err := store.TaskCounts(ctx, m.db); err == nil {
+		for _, state := range store.TaskStates {
+			ch <- prometheus.MustNewConstMetric(m.tasksDesc, prometheus.GaugeValue, float64(counts[state]), state)
 		}
 	}
 }

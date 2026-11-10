@@ -15,6 +15,7 @@ import (
 
 	"github.com/iammdzaidalam/ledger/checker"
 	ledgerv1 "github.com/iammdzaidalam/ledger/server/gen/ledger/v1"
+	"github.com/iammdzaidalam/ledger/server/internal/events"
 	"github.com/iammdzaidalam/ledger/server/internal/metrics"
 	"github.com/iammdzaidalam/ledger/server/internal/queue"
 	"github.com/iammdzaidalam/ledger/server/internal/store"
@@ -36,6 +37,7 @@ type Service struct {
 	Metrics       *metrics.Metrics
 	JudgeEnabled  bool
 	JudgeAttempts int
+	Events        events.Publisher
 }
 
 func (s *Service) Check(ctx context.Context, req *connect.Request[ledgerv1.CheckRequest]) (*connect.Response[ledgerv1.CheckResponse], error) {
@@ -150,7 +152,30 @@ func (s *Service) RecordTurn(ctx context.Context, req *connect.Request[ledgerv1.
 	if err != nil {
 		return nil, err
 	}
+	if outcome == "new" {
+		s.publishTurn(ctx, m.RunId, int(m.Turn), out.Check)
+	}
 	return connect.NewResponse(out), nil
+}
+
+func (s *Service) publishTurn(ctx context.Context, runID string, turn int, check *ledgerv1.CheckResponse) {
+	if s.Events == nil {
+		return
+	}
+	swarmID, taskID, ok, err := store.AttemptOwner(ctx, s.DB, runID)
+	if err != nil || !ok {
+		return
+	}
+	state := "clean"
+	if check.Flagged {
+		state = "flagged"
+	}
+	s.Events.Publish(ctx, events.Event{
+		SwarmID: swarmID, TaskID: taskID, AttemptID: runID, Type: events.AttemptTurn,
+		Message: fmt.Sprintf("turn %d %s", turn, state),
+		Data:    map[string]any{"turn": turn, "flagged": check.Flagged, "claims": len(check.Claims)},
+		At:      time.Now().UTC(),
+	})
 }
 
 func (s *Service) GetRun(ctx context.Context, req *connect.Request[ledgerv1.GetRunRequest]) (*connect.Response[ledgerv1.GetRunResponse], error) {

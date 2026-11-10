@@ -16,10 +16,13 @@ import (
 
 	"github.com/iammdzaidalam/ledger/server/gen/ledger/v1/ledgerv1connect"
 	"github.com/iammdzaidalam/ledger/server/internal/breaker"
+	"github.com/iammdzaidalam/ledger/server/internal/events"
 	"github.com/iammdzaidalam/ledger/server/internal/judge"
 	"github.com/iammdzaidalam/ledger/server/internal/metrics"
+	"github.com/iammdzaidalam/ledger/server/internal/orch"
 	"github.com/iammdzaidalam/ledger/server/internal/queue"
 	"github.com/iammdzaidalam/ledger/server/internal/store"
+	"github.com/iammdzaidalam/ledger/server/internal/telemetry"
 	"github.com/iammdzaidalam/ledger/server/internal/verify"
 	"github.com/iammdzaidalam/ledger/server/internal/web"
 )
@@ -50,6 +53,18 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	flush, err := telemetry.Setup(ctx, "ledgerd")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		closing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := flush(closing); err != nil {
+			log.Warn("flush traces", "err", err)
+		}
+	}()
+
 	db, err := store.Open(ctx, env("LEDGER_DATABASE_URL", "postgres://ledger:ledger@localhost:5432/ledger"))
 	if err != nil {
 		return err
@@ -60,7 +75,16 @@ func run(log *slog.Logger) error {
 	}
 
 	m := metrics.New(db.Pool)
-	svc := &verify.Service{DB: db.Pool, Metrics: m, JudgeAttempts: envInt("LEDGER_JUDGE_ATTEMPTS", 5)}
+	bus := events.Open(ctx, os.Getenv("LEDGER_REDIS_URL"), log, m.EventsDropped.Inc)
+	defer bus.Close()
+	svc := &verify.Service{DB: db.Pool, Metrics: m, Events: bus, JudgeAttempts: envInt("LEDGER_JUDGE_ATTEMPTS", 5)}
+	swarm := &orch.Service{DB: db.Pool, Bus: bus, Metrics: m, Log: log}
+
+	reaper := make(chan struct{})
+	go func() {
+		defer close(reaper)
+		swarm.RunReaper(ctx, 10*time.Second)
+	}()
 
 	workers := make(chan struct{})
 	if model := os.Getenv("LEDGER_JUDGE_MODEL"); model != "" {
@@ -95,12 +119,20 @@ func run(log *slog.Logger) error {
 		close(workers)
 	}
 
-	mux := http.NewServeMux()
-	path, handler := ledgerv1connect.NewVerifyServiceHandler(svc,
-		connect.WithInterceptors(m.Interceptor()),
+	traces, err := telemetry.Interceptor()
+	if err != nil {
+		return err
+	}
+	opts := []connect.HandlerOption{
+		connect.WithInterceptors(traces, m.Interceptor()),
 		connect.WithReadMaxBytes(envInt("LEDGER_MAX_REQUEST_BYTES", 8<<20)),
-	)
+	}
+	mux := http.NewServeMux()
+	path, handler := ledgerv1connect.NewVerifyServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
+	path, handler = ledgerv1connect.NewSwarmServiceHandler(swarm, opts...)
+	mux.Handle(path, handler)
+	mux.Handle("GET /events", events.SSE{Bus: bus})
 	mux.Handle("GET /{$}", web.Handler())
 	mux.Handle("GET /metrics", promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{}))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -136,6 +168,7 @@ func run(log *slog.Logger) error {
 	defer cancel()
 	err = srv.Shutdown(shutdown)
 	<-workers
+	<-reaper
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
