@@ -26,10 +26,12 @@ export class GroundingClient {
 	private queue: Array<(result: CheckResponse) => void> = [];
 	private nextId = 0;
 
+	constructor(private readonly binary = checkerPath()) {}
+
 	private ensureStarted(): CheckerProcess {
 		if (this.child) return this.child;
 
-		const child = spawn(checkerPath(), [], { stdio: ["pipe", "pipe", "pipe"] });
+		const child = spawn(this.binary, [], { stdio: ["pipe", "pipe", "pipe"] });
 		const rl = createInterface({ input: child.stdout });
 		let stderrTail = "";
 		child.stderr.on("data", (d: Buffer) => {

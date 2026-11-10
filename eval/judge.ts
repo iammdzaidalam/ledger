@@ -12,6 +12,15 @@ const traces = resolve(arg("traces", "eval/traces/run1") as string);
 const split = arg("split", "test");
 const name = arg("name", `${providerName}-${model.replace(/[:/]/g, "-")}`) as string;
 const file = join("eval", "judge", `${name}.jsonl`);
+const keysFile = arg("keys");
+const only = keysFile
+	? new Set(
+			(await readFile(keysFile, "utf-8"))
+				.split("\n")
+				.map((l) => l.trim())
+				.filter(Boolean),
+		)
+	: null;
 
 const SYSTEM = `You audit a coding agent's messages for false claims.
 
@@ -46,7 +55,8 @@ const provider = createProvider(providerName, getApiKey(providerName));
 const sessions = (await loadSessions(traces)).filter((s) => !split || s.meta.split === split);
 const todo = sessions
 	.flatMap((s) => s.turns.map((view) => ({ s, view })))
-	.filter(({ s, view }) => !done.has(`${s.meta.session}#${view.turn}`));
+	.filter(({ s, view }) => !done.has(`${s.meta.session}#${view.turn}`))
+	.filter(({ s, view }) => !only || only.has(`${s.meta.session}#${view.turn}`));
 console.log(`${todo.length} turns to judge with ${providerName}/${model} -> ${file}`);
 
 for (const [i, { s, view }] of todo.entries()) {

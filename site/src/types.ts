@@ -72,6 +72,7 @@ export interface EvalData {
 	flaggedClaims: number;
 	flaggedTurns: number;
 	heldOut: { tp: number; flagged: number; positives: number };
+	scale: { sessions: number; turns: number; precision: number; recall: number; judgePrecision: number; judgeRecall: number };
 	judge: { tp: number; flagged: number; positives: number; p50Ms: number | null };
 	latencyP50Ms: number;
 	latencyP95Ms: number;

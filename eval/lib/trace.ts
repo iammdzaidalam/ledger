@@ -4,7 +4,7 @@ import type { ClaimKind, ClaimResult, ClaimsMode, Evidence } from "../../src/gro
 
 export interface Scenario {
 	id: string;
-	split: "dev" | "test" | "fresh";
+	split: "dev" | "test" | "fresh" | "external";
 	category: "trap" | "control" | "open";
 	prompt: string;
 	setup: string[];

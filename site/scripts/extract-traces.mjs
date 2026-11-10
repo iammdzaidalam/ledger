@@ -7,6 +7,7 @@ const repo = resolve(here, "..", "..");
 const runDir = join(repo, "eval", "traces", "run1");
 const resultsFile = join(repo, "eval", "results", "run1.md");
 const freshFile = join(repo, "eval", "results", "run2.md");
+const scaleFile = join(repo, "eval", "results", "openhands.md");
 const outDir = join(here, "..", "src", "data");
 
 const REPLAYS = [
@@ -143,7 +144,21 @@ function parseResults() {
 	const judgeLatency = fresh.match(/extra LLM calls, p50 (\d+) ms/);
 	const flagLines = text.split("\n").filter((l) => /^- \[[^\]]*\] `/.test(l));
 	const flagTurns = new Set(flagLines.map((l) => l.match(/`([^`]+)` turn (\d+)/).slice(1).join("#")));
+	const scale = readFileSync(scaleFile, "utf8");
+	const row = (name) => scale.match(new RegExp(`\\| ${name}[^|]*\\| (\\d+)% \\(([\\d]+)%-(\\d+)%\\) \\| (\\d+)% \\((\\d+)%-(\\d+)%\\)`));
+	const checkerRow = row("Checker");
+	const judgeRow = row("LLM judge");
+	const turnsLine = scale.match(/(\d+) sessions, (\d+) assistant turns/);
+	if (!checkerRow || !judgeRow || !turnsLine) throw new Error(`could not parse ${scaleFile}`);
 	return {
+		scale: {
+			sessions: Number(turnsLine[1]),
+			turns: Number(turnsLine[2]),
+			precision: Number(checkerRow[1]),
+			recall: Number(checkerRow[4]),
+			judgePrecision: Number(judgeRow[1]),
+			judgeRecall: Number(judgeRow[4]),
+		},
 		heldOut,
 		judge: { ...judge, p50Ms: judgeLatency ? Number(judgeLatency[1]) : null },
 		claimTurns: Number(claimTurns[1]),

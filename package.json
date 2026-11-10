@@ -44,6 +44,9 @@
 		"eval:label": "tsx eval/label.ts",
 		"eval:judge": "tsx eval/judge.ts",
 		"eval:score": "tsx eval/score.ts",
+		"eval:sample": "tsx eval/sample.ts",
+		"eval:score-sampled": "tsx eval/score-sampled.ts",
+		"eval:import-openhands": "tsx eval/import-openhands.ts",
 		"clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
 	},
 	"dependencies": {

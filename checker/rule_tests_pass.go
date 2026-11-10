@@ -33,6 +33,9 @@ func checkTestsPass(c Claim, target Evidence, found bool, req CheckRequest) (Ver
 	if summary.Found {
 		counts = fmt.Sprintf(" (%s: %d passed, %d failed)", summary.Runner, summary.Passed, summary.Failed)
 	}
+	if summary.Found && summary.Passed > 0 && summary.Failed > 0 && excludes.MatchString(c.Text) {
+		return Unverifiable, Describe(target) + " and the claim leaves some tests out" + counts
+	}
 	if !Succeeded(target) {
 		return Contradicted, Describe(target) + counts
 	}

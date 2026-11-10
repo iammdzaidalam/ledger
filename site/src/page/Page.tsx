@@ -370,9 +370,9 @@ function Results() {
 								{data.latencyP50Ms} ms per turn at the median, {data.latencyP95Ms} ms at p95, no model calls.
 							</li>
 							<li>
-								On six scenarios written after its last rule change, {data.heldOut.tp} of its {data.heldOut.flagged}{" "}
-								flags were right and it caught {data.heldOut.tp} of {data.heldOut.positives} false turns. A local LLM
-								judge caught all {data.judge.tp} but flagged {data.judge.flagged} turns.
+								On {data.scale.turns.toLocaleString("en-US")} real turns from a frontier model fixing GitHub issues,{" "}
+								{data.scale.precision}% of its flags were right and it caught about {data.scale.recall}% of false turns. A local
+								LLM judge caught them all, but only {data.scale.judgePrecision}% of its flags were right.
 							</li>
 							<li>Labels by two blind Claude passes. No person has checked them yet.</li>
 						</ul>

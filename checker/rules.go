@@ -64,6 +64,11 @@ func attribute(c Claim, req CheckRequest) (Evidence, Attribution) {
 	if e, ok := mentioned(c, req.Evidence); ok {
 		return e, ByMention
 	}
+	if c.Kind == KindTestsPass {
+		if e, ok := scopedRun(c, req.Evidence); ok {
+			return e, ByMention
+		}
+	}
 	var keep func(Evidence) bool
 	switch c.Kind {
 	case KindTestsPass:

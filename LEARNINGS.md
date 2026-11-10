@@ -70,18 +70,18 @@ Short running notes on what changed, what broke, what got fixed, and why.
 - "all 12 tests passed" was verified when 2 tests ran. A claimed count above the summary total is now contradicted (not for `go test`, which counts packages).
 - Net on dev: 4 false positives gone, one wrong reason fixed, all 5 correct flags kept, 4 missed lies now caught.
 
-## Validation loop (after reading murmur)
+## Validation loop
 
-- murmur runs an LLM validator per task and asks for up to 0-2 revisions by mode. Kept the loop shape, not the judge: verdicts still come from the deterministic checker.
+- A common design runs an LLM validator per task and asks for up to 0-2 revisions by mode. Kept the loop shape, not the judge: verdicts still come from the deterministic checker.
 - `--feedback` was once per run, so a lie at turn 15 got nothing if turn 3 used it up. Now `--validate off|flag|revise|strict` with a budget per flagged turn and a cap per run.
 - The revised answer is not always the next turn: the honest fix for "tests pass" is to rerun the tests, so tool-only turns are waited through.
 - A repeated "Done, it worked." with no new command looked like a retraction, because the checker skips vague success with nothing fresh. The validator carries the original turn's fresh refs through the revision.
 - Unverifiable claims are never sent back. Pushing on them makes models retract true statements.
 - strict counts a checker failure as unverified. Auto-approving when the validator is down is the failure strict exists to catch.
 
-## Features taken from cogent
+## Permissions, git tools, sessions
 
-- cogent has no license file, so nothing was copied. Permissions, git tools, session resume, readable provider errors, compaction and slash commands were written from scratch against Ledger's own evidence log.
+- Permissions, git tools, session resume, readable provider errors, compaction and slash commands are all built on Ledger's own evidence log.
 - A denied tool call is still recorded as evidence with `executed: false`, so "I ran it" after a denial is caught by `not_executed`.
 - The evidence log lives outside the message history, so compaction never drops it and resume replays it. A test checks that "I already ran the tests and they pass" after compaction is still contradicted by the old run.
 - The REPL used to save messages by slicing from the turn start, which breaks once compaction replaces history mid-run. Sessions now write compaction markers and rebuild with the same function on resume.
@@ -91,7 +91,7 @@ Short running notes on what changed, what broke, what got fixed, and why.
 ## Merging parallel work
 
 - Two agents worked in separate worktrees that both touched `loop.ts`. The worktrees sat inside the repo, and Biome refused to run because it found their nested `biome.json` files. Merged each file three-way with `git merge-file` so nothing was staged, then removed the worktrees.
-- The cogent work moved print and REPL onto a shared `runTurn`, so the validation wiring (revision events, ledger summary, strict exit code) moved there instead of being patched into both modes.
+- The sessions work moved print and REPL onto a shared `runTurn`, so the validation wiring (revision events, ledger summary, strict exit code) moved there instead of being patched into both modes.
 
 ## Cancelling a turn
 
@@ -111,7 +111,7 @@ Short running notes on what changed, what broke, what got fixed, and why.
 - Six annotator agents labeled all 303 turns blind from the exported packets, and a second pass relabeled the 161 held-out turns. The two passes agreed on every held-out turn, but they are the same model, so that is weaker than two people agreeing. A person still needs to check them.
 - Held-out: 60% precision (3/5) and 23% recall (3/13). Dev, where the rules were tuned: 100% (8/8) and 67% (8/12). The gap between the two is the tuning showing.
 - Six of the ten held-out misses were gofmt-dirty turns. My first guess was the lint rule, but it already treats a non-empty `gofmt -l` as a failure. The claims were never extracted: "no files need formatting", "does not need gofmt" and "adheres to the formatting guidelines" matched no pattern, because the pattern wanted a linter name followed by clean/pass. Probe the extractor before blaming the rule.
-- The qwen2.5:7b judge caught all 13 but flagged 134 of 161 turns, so 90% of its flags were wrong, at 655 ms a call. Grading with a small local model says "everything is suspicious", which is the failure murmur's validator has to live with too.
+- The qwen2.5:7b judge caught all 13 but flagged 134 of 161 turns, so 90% of its flags were wrong, at 655 ms a call. Grading with a small local model says "everything is suspicious". An LLM validator in a loop inherits that.
 - The labeling CLI read piped answers with readline's `question()`, which drops lines that arrive before the prompt. It now reads lines through the async iterator, quits cleanly at the end of input, and has undo.
 
 ## Fixing the held-out misses
@@ -125,4 +125,27 @@ Short running notes on what changed, what broke, what got fixed, and why.
 - run2 on the six fresh scenarios: 67% precision (4/6) and 57% recall (4/7) per turn, against 60% and 23% on run1's held-out turns before the fixes. Recall more than doubled and precision held, but with 7 false turns the interval is wide (25-84% recall).
 - The fresh misses look like the old ones: "the issue has been addressed" ("addressed" is not a fix word) and "Bash command executed to run tests" with no command. The two wrong flags were "fixed" as an adjective inside a tool call printed as text, and "The other test passed." after a run where one passed and one failed. A partial-pass sentence needs its own handling; a run that exits 1 does not make every "passed" false.
 - The annotator passes disagreed on one turn of 295: "Not all 12 tests pass" when 2 ran. The guide says a wrong count is false only when it contradicts the summary, and also that a failure report is not a claim. The guide needs one line on which wins.
+
+
+## Real traces at scale (OpenHands, 13,664 turns)
+
+- run1 and run2 had 13 and 7 false turns, too few to trust. 300 trajectories from nebius/SWE-rebench-openhands-trajectories (Qwen3-Coder-480B in OpenHands on real GitHub issues, CC-BY-4.0) convert cleanly: execute_bash prints `[Command finished with exit code N]`, str_replace_editor reports each create and edit, and the finish tool's message is the closing claim.
+- Labeling 13,664 long turns was too expensive, so the sample is stratified by the checker's own outcome: all 404 flagged turns, 600 of 1,480 verified, 1,000 of 11,780 with no claim, weighted back up. Only about 2% of turns hold a false claim, which is why the small runs had so few.
+- The checker was frozen before sampling. On this set it lands at about 21% precision and 31% recall. The small local-model runs flattered it: frontier models phrase things differently and work in a way the rules never saw.
+- The biggest false-positive source: OpenHands writes a new reproduction or test script after the fix, and the checker counts that new file as a code change, so "Fixed X" after a passing run reads as "nothing was rerun afterwards". A new file the agent created is not a change to the code under test.
+- "I've successfully reproduced the issue" after a script that exits 1 is true; reproducing a bug means the script fails. command_success treats it as a lie.
+- Scoped test claims ("all other soma tests pass", a pass count quoted from an earlier run) get checked against the latest run and its failures. The attribution needs to find the run the sentence is about.
+- Annotator passes agreed on 292 of 300 shared turns (kappa 0.75), down from near-perfect on the small runs. Real trajectories are harder to judge, even for a careful reader.
+- The importer hit Hugging Face's rate limit around 150 rows and stopped silently behind a `| tail`. It now resumes from a manifest of fetched offsets and backs off for longer on 429s.
+
+## Fixing the real-trace false positives
+
+- The OpenHands sample is now dev data, since the fixes were made by reading its false positives. The held-out check is a new batch drawn with a different seed.
+- New files the agent created no longer count as the fix. The checker takes the latest change to a file that existed before the session, and only falls back to new files when nothing else changed. On the dev sample "Write X but nothing was rerun afterwards" dropped from 123 false flags to 17, and from 40 correct ones to 4.
+- That moved the fix earlier, and the latest command after it was often an unrelated failing script. A rerun of a command that failed before the change now wins over the latest test run.
+- "Reproduced the issue", "confirmed the bug" and "demonstrated the error" are not success claims.
+- A test claim with a count ("64/64 tests") goes to the run with that many tests, and one that names a module ("the soma tests") goes to the latest run whose command has that name. "All other", "most" and "remaining" with a run that had both passes and failures is unverifiable, not a lie.
+- Dev sample: 21% to 25% precision, 31% to 27% recall. Smaller than the counts suggest, because fixing one pattern exposes the next: the remaining false flags are "working correctly" checked against the last command of the turn, and staleness after a cleanup edit, where the labels are a judgment call.
+- run2's fresh scenarios went from 4/6 to 4/5 precision with recall unchanged, so nothing regressed on the small runs.
+- `score-sampled --design <checker>` scores a changed checker against labels that were drawn for the frozen one: strata and weights come from the frozen binary, flags from the new one.
 

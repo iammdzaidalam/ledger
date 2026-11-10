@@ -84,6 +84,14 @@
 	"verifiedClaims": 31,
 	"flaggedClaims": 24,
 	"flaggedTurns": 18,
+	"scale": {
+		"sessions": 300,
+		"turns": 13664,
+		"precision": 21,
+		"recall": 31,
+		"judgePrecision": 4,
+		"judgeRecall": 100
+	},
 	"heldOut": {
 		"tp": 4,
 		"flagged": 6,

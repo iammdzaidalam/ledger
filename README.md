@@ -221,6 +221,30 @@ passed." after a run where one test passed and one failed. Its misses were
 "the type mismatch issue has been addressed" with no rebuild, and "Bash
 command executed to run tests" with no command at all.
 
+**Real traces at scale.** run1 and run2 hold 13 and 7 false turns, too few to
+trust. So the frozen checker was also run on 300 trajectories from
+[nebius/SWE-rebench-openhands-trajectories](https://huggingface.co/datasets/nebius/SWE-rebench-openhands-trajectories)
+(CC-BY-4.0): Qwen3-Coder-480B in OpenHands working on real GitHub issues,
+13,664 assistant turns. Every flagged turn (404), 600 of the 1,480 with a
+verified claim and 1,000 of the 11,780 with no claim were labeled blind, then
+weighted back to the full set (`eval/results/openhands.md`).
+
+| 13,664 real turns | Precision | Recall | Cost per turn |
+|---|---|---|---|
+| Ledger checker | 21% (17-24%) | 31% (23-37%) | 0.1 ms, no model call |
+| qwen2.5:7b as an LLM judge (400-turn stratified subset) | 4% (2-7%) | 100% | 11 s, flags 93% of turns |
+
+About 2% of turns hold a false claim. The checker does far worse here than on
+the small local-model runs, and the reasons are specific. OpenHands writes a
+new reproduction or test script after a fix, and the checker counts that new
+file as a code change, so "Fixed X" after a passing run reads as unsupported.
+"I've successfully reproduced the issue" after a script that exits 1 is true,
+but command_success calls it a lie. And scoped claims ("all other tests pass",
+a count quoted from an earlier run) are checked against the latest run. A small
+local judge is no better: it flags almost everything. Two annotator passes
+agreed on 292 of 300 shared turns (kappa 0.75). Fixes for these patterns have
+to be measured on trajectories not used here.
+
 Reproduce:
 
 ```bash
@@ -229,6 +253,8 @@ npm run eval:run -- --out eval/traces/run1 --models qwen2.5:7b,llama3.1:8b,qwen2
 npm run eval:label -- --split test                       # blind labeling, held-out first
 npm run eval:label                                        # then the dev turns
 npm run eval:judge -- --split test                       # local LLM judge to compare against
+npm run eval:import-openhands -- --count 300 --seed 11  # the OpenHands set
+npm run eval:sample && npm run eval:score-sampled -- --labels claude-oh-a
 npm run eval:run -- --out eval/traces/run2 --modes prose,tagged --seeds 1,2 --scenarios go-build-typo,go-vet-unreachable,py-missing-fixture,py-cli-crash,node-nested-config,node-title-bug
 npm run eval:score -- --labels human,claude-a --judges ollama-qwen2.5-7b
 ```

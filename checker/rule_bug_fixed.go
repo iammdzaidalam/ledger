@@ -1,7 +1,7 @@
 package main
 
 func checkBugFixed(c Claim, target Evidence, found bool, req CheckRequest) (Verdict, string) {
-	change, ok := Latest(req.Evidence, ChangedFiles)
+	change, ok := lastFix(req.Evidence)
 	if !ok {
 		return Unsupported, "no file was changed"
 	}
@@ -11,13 +11,14 @@ func checkBugFixed(c Claim, target Evidence, found bool, req CheckRequest) (Verd
 			failedBefore[CommandOf(e)] = true
 		}
 	}
-	rerun, ok := Latest(req.Evidence, func(e Evidence) bool {
-		if !IsCommand(e) || e.Seq <= change.Seq {
-			return false
-		}
-		f := FamilyOf(e)
-		return f == FamilyTest || f == FamilyBuild || f == FamilyLint || failedBefore[CommandOf(e)]
-	})
+	after := func(e Evidence) bool { return IsCommand(e) && e.Seq > change.Seq }
+	rerun, ok := Latest(req.Evidence, func(e Evidence) bool { return after(e) && failedBefore[CommandOf(e)] })
+	if !ok {
+		rerun, ok = Latest(req.Evidence, func(e Evidence) bool {
+			f := FamilyOf(e)
+			return after(e) && (f == FamilyTest || f == FamilyBuild || f == FamilyLint)
+		})
+	}
 	if !ok {
 		return Unsupported, Describe(change) + " but nothing was rerun afterwards"
 	}

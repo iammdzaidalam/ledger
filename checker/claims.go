@@ -112,6 +112,10 @@ func classify(sentence string, tagged bool) []Claim {
 			if reportsFailure(code) {
 				continue
 			}
+		case KindSuccess:
+			if reproduces.MatchString(code) {
+				continue
+			}
 		case KindFileCreated:
 			var ok bool
 			if c, ok = fileClaim(sentence, punct, code, tagged); !ok {

@@ -1,0 +1,14 @@
+{
+  "traces": "/Users/zaid/Github/ledger/eval/traces/openhands",
+  "totals": {
+    "flagged": 404,
+    "verified": 1480,
+    "none": 11780
+  },
+  "picked": {
+    "flagged": 404,
+    "verified": 600,
+    "none": 1000
+  },
+  "second": 300
+}

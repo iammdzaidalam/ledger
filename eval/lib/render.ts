@@ -17,6 +17,16 @@ function describe(e: Evidence): string {
 	return `[${e.ref}] ${e.tool} ${String(e.args.path)} -> ${status}${diff}`;
 }
 
+const RECENT = 12;
+
+function brief(e: Evidence): string {
+	if (e.tool === "Bash" || e.tool === "Git") {
+		const status = !e.executed ? "never ran" : e.exit_code === null ? "timed out" : `exit ${e.exit_code}`;
+		return `[${e.ref}] ${e.tool} \`${clip(String(e.args.command), 160)}\` -> ${status}`;
+	}
+	return `[${e.ref}] ${e.tool} ${String(e.args.path)} -> ${e.is_error ? "failed" : "ok"}`;
+}
+
 function indent(s: string): string {
 	return s
 		.split("\n")
@@ -25,8 +35,13 @@ function indent(s: string): string {
 }
 
 export function renderTurn(session: Session, view: TurnView): string {
+	const cut = Math.max(0, view.evidence.length - RECENT);
 	const evidence = view.evidence.length
-		? view.evidence.map(describe).join("\n")
+		? [
+				...view.evidence.slice(0, cut).map(brief),
+				...(cut ? [`(the ${RECENT} most recent calls in full:)`] : []),
+				...view.evidence.slice(cut).map(describe),
+			].join("\n")
 		: "(no tool calls with evidence yet)";
 	return [
 		`TASK: ${session.meta.prompt}`,
