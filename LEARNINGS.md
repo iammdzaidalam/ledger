@@ -157,3 +157,29 @@ Short running notes on what changed, what broke, what got fixed, and why.
 - The intervals overlap, so this does not show the fixes hurt, only that they did not help. They removed 18 false flags and lost 5 turns. Those 5 were flagged by accident: the old rule said "Write final_test.py but nothing was rerun" about a scratch file, while the real problem was a pass claim backed by a test subset or a failed full run.
 - The remaining false flags are mostly judgment calls on the labels (an edit followed by a failing unrelated test) and "all tests pass" claims that need a full-suite run to check. Both are bigger changes than a regex tweak.
 - Stopped tuning here. Each round of fixes on a sample turns it into dev data, and the number to report is the one measured before the fixes: 21% precision at scale, 20% on a fresh batch.
+
+## Fleet client
+
+- A swarm worker is an ordinary `ledger --print` process running inside a git worktree, so the server only sees turns through the same recorder every session uses. That keeps the gate honest: it judges the evidence the child recorded, not what the worker says about it.
+- Retries had to continue from the earlier attempt's commit. Reusing the task branch and worktree is enough; the feedback goes in front of the original prompt.
+- Anything that mutates the repo goes through the integration worktree. A failed merge is aborted and the worktree reset, so the next job never starts from a half-merged tree. The user's checkout is never switched or written to.
+- Session files land in `.ledger/` inside each worktree. `git add -A` would commit them in repos that do not ignore `.ledger`, so the commit step excludes that path.
+- The SSE stream uses snake_case keys while the Connect JSON uses camelCase; the reader accepts both.
+
+## Fleet server and the first real swarm
+
+- The first swarm run with a real local model said both tasks were merged. The integration branch held only the starting commit and the build still failed. The worker had reported the base commit as its own because the commit step returns HEAD even when nothing was staged, and the gate passed any attempt with a commit and a clean last turn. A swarm that merges nothing and calls it success is the failure the whole project is about, so it was the first thing to fix: no changed files now means no commit, the gate retries once with a hint and then fails, and the ungated baseline fails it too since there is nothing to merge.
+- Merged is not fixed. In the two-scenario smoke run the gated swarm merged a `go build` fix that still did not build, because the checker had no false claim to flag. The gate can only stop what the checker can see, which is why the experiment measures merged-but-still-failing next to merged.
+- Per-swarm locks in the state machine deadlocked against a foreign-key check on the runs table when a turn was recorded while an attempt was completing. Taking the swarm lock first in every path fixed it; the test that found it only ran once Redis was actually reachable, because the first run silently skipped the Redis-backed tests.
+- An open circuit breaker should not burn a job's retries. Parked jobs refund their attempt and wait out the cooldown, so an hour-long judge outage ends with the queue intact instead of dead-lettered.
+- Persisted turn ingest tops out near 3.9k/s on a laptop with Postgres in Docker, and 128 clients only raise the latency. The queue is not the limit; one transaction per turn is.
+- The load generator reported 30 errors per run that were all in-flight requests cut off by its own deadline. Check the error text before believing an error count.
+- The full gate-on/gate-off run (36 swarms, 45 tasks per arm with a real bug) came out small: 12/45 merged and verified with the gate against 9/45 without, intervals overlapping. The attempt table explains why. Every retry and every gate failure in the run was "no files were changed", none came from a flagged claim, so the gate was acting as a retry on empty output and not as a lie detector. The checker had nothing to flag because a 7B model's failures here are code that does not compile, not claims that tests passed. Control tasks, which are already green, made the first table look better than it was, so the report now splits them out.
+
+## The site sandbox
+
+- The checker runs in the page as WebAssembly, built from the same package with a 40-line wrapper under `checker/cmd/ledger-wasm`. It is 3.8 MB raw and 1.05 MB gzipped; the Go runtime and `encoding/json` are most of that, the checker itself is small. It loads when the sandbox scrolls into view or on the first edit, never on page load.
+- The recorded verdicts in the eval traces came from the checker as it was then. Replayed through today's checker, only 6 of the 15 flagged turns in the traces still produce their recorded verdicts; the rest changed or stopped flagging after the held-out fixes. The sandbox presets keep only turns that still reproduce their recorded verdicts, and the site build fails if one stops doing so. Two presets use a real session's evidence with a reply written for the demo, and say so.
+- The fleet gate in the page is a TypeScript port of `Decide` and `Feedback`, checked against the cases in `gate_test.go`. It showed something the numbers hide: a turn that is clean and honest still gets RETRY when nothing changed a file, which is most of what the fleet run's retries were.
+- The swarm replay rebuilds events from the `attempts` and `tasks` tables, since events only go out on Redis and are not stored. Every timestamp, decision, reason and feedback string is the recorded one; the replay labels itself as a replay.
+- The design kit sets section heights for 900px-tall screens, so on a 1440x700 laptop the sandbox would have overlapped the next section. Short desktop screens now let sections grow instead.

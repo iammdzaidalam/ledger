@@ -28,6 +28,7 @@ ledger --provider ollama --model qwen2.5:7b   # fully local
 - [How a claim gets checked](#how-a-claim-gets-checked)
 - [The rules](#the-rules)
 - [Evaluation](#evaluation)
+- [Fleet: parallel agents behind the gate](#fleet-parallel-agents-behind-the-gate)
 - [System design](#system-design)
 - [Project layout](#project-layout)
 - [Getting started](#getting-started)
@@ -265,6 +266,121 @@ npm run eval:run -- --out eval/traces/run2 --modes prose,tagged --seeds 1,2 --sc
 npm run eval:score -- --labels human,claude-a --judges ollama-qwen2.5-7b
 ```
 
+## Fleet: parallel agents behind the gate
+
+`ledger swarm` splits one goal into subtasks and runs each in its own git
+worktree. A Go service decides, from the checker's verdicts on each attempt's
+turns, whether the attempt may be merged, must retry with the flagged claims
+as feedback, or is blocked.
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d        # postgres, redis, ledgerd, prometheus, jaeger
+ledger swarm "add input validation to the CLI and update the docs" --workers 3 \
+  --server http://localhost:8080 --provider ollama --model qwen2.5:7b
+ledger swarm "..." --subtask "fix the parser bug" --subtask "document the flags"
+open http://localhost:8080                               # live lanes, attempts, blocked claims
+```
+
+```
+ledger swarm (planner, N workers, merge queue)          dashboard, SSE /events
+        |  Connect/gRPC                                        ^
+        v                                                      | Redis pub/sub
+ledgerd  SwarmService: tasks -> attempts -> gate -------------+
+         VerifyService: RecordTurn -> checker (Go) -> verdicts
+         Postgres: runs, turns, verdicts, swarms, tasks, attempts, jobs
+         Prometheus /metrics, OpenTelemetry (OTLP) when configured
+```
+
+How a swarm runs:
+
+- **Plan.** The planner asks the model for independent subtasks and falls back
+  to one subtask if the answer is unusable. `--subtask` skips planning.
+- **Workers pull.** A worker claims an attempt with a lease, creates the
+  worktree and branch `ledger/<swarm>/<n>`, runs the agent as a child process
+  with `--validate strict`, and heartbeats. Every turn is recorded on the
+  server under the attempt's run id. If a worker dies, the lease expires and
+  another worker picks the attempt up, so a run survives crashes.
+- **Gate.** On completion the server looks at the last turn's verdicts. Clean
+  and committed passes. Flagged with attempts left retries, and the next
+  attempt continues from the previous commit with the checker's reasons in its
+  prompt. Flagged on the last attempt is blocked. An attempt that changed no
+  file retries once with a hint, then fails. `--no-gate` merges whatever a
+  worker committed, which is the baseline for the experiment below.
+- **Merge queue.** Passed branches are merged one at a time into
+  `ledger/<swarm>/integration` with `git merge --no-ff`. A conflict aborts
+  cleanly and the task is marked conflicted. Your checked-out branch and
+  working tree are never touched.
+- **Idempotent and resumable.** The swarm is keyed by goal and base commit, so
+  rerunning after a crash attaches to the same swarm. `--resume <id>` does the
+  same by id.
+
+Server settings (environment): `LEDGER_DATABASE_URL`, `LEDGER_ADDR`,
+`LEDGER_REDIS_URL` (events fall back to memory without it),
+`OTEL_EXPORTER_OTLP_ENDPOINT` (tracing is off without it), and
+`LEDGER_JUDGE_MODEL`/`LEDGER_JUDGE_URL` to run an LLM judge next to the
+checker through the job queue.
+
+Choices worth knowing:
+
+- **Postgres as the queue.** Jobs and attempts are claimed with
+  `FOR UPDATE SKIP LOCKED` and a lease. At this volume that gives a durable,
+  concurrent queue without running Kafka. It would stop being enough when
+  claims, not checks, become the bottleneck.
+- **Workers pull instead of being pushed to.** Leases make a crashed worker
+  harmless and let workers run on any machine that can reach the server.
+- **The judge sits behind a circuit breaker.** When the model endpoint fails,
+  jobs are parked without spending their retry budget and the breaker probes
+  with one call at a time.
+- **Turn ingest is idempotent.** The same turn replayed returns the stored
+  verdict; the same turn id with different text is rejected.
+
+Measured on one laptop (Apple M5, Postgres in Docker, 12 tool calls per turn,
+`server/cmd/loadgen`):
+
+| | Throughput | p50 | p99 |
+|---|---|---|---|
+| `Check` (stateless, 32 clients) | 21-25k/s | 1.0 ms | 5.7 ms |
+| `RecordTurn` (persisted, 8 clients) | 3.6k/s | 2.1 ms | 4.1 ms |
+| `RecordTurn` (persisted, 32 clients) | 3.9k/s | 7.9 ms | 13.4 ms |
+| `RecordTurn` (persisted, 128 clients) | 3.6k/s | 34 ms | 71 ms |
+
+Persisted writes plateau at about 3.9k/s: the database is the limit, and extra
+clients only add queueing.
+
+### Gate on and off
+
+`eval/fleet.ts` builds a repository with three independent problems per swarm
+(a bug in Node, Python or Go, a failing build, a formatter complaint, plus
+controls that are already green), runs `ledger swarm` with `qwen2.5:7b` on
+Ollama once with the gate and once without, and then runs each problem's own
+verify command on the integration branch. Six groups, three seeds, 36 swarms,
+54 tasks per arm. The full table is `eval/results/fleet.md`.
+
+| Tasks with a real bug (45 per arm) | Gate on | Gate off |
+|---|---|---|
+| Merged and verified | 12 (27%, 16%-41%) | 9 (20%, 11%-34%) |
+| Merged but verify still fails | 21 | 15 |
+| Failed or conflict | 12 | 21 |
+| Attempts per task | 1.56 | 1.00 |
+| Wall time per swarm | 4.3 min | 2.2 min |
+
+The difference is small and the intervals overlap, so 54 tasks per arm do not
+show that the gate improves outcomes. What the data does show:
+
+- All of the gate's extra merges come from the no-change retry, none from
+  catching a false claim. Across both arms the attempt table has 32 retries and
+  14 failures, every one of them "no files were changed": the 7B workers often
+  exit without editing anything, and the gate sends those back once with a
+  hint instead of merging nothing. The checker flagged no turn in this run.
+- Blocked is zero in both arms. The gate can only stop what the checker can
+  see, and the failures here are code that does not build or does not fix the
+  bug, with no test-success claim to contradict. About two thirds of merged
+  bug tasks still fail their verify command in both arms.
+- The gate costs about twice the wall time, because retries rerun the agent.
+
+The honest reading is that the gate is a cheap filter on false claims, not a
+substitute for running the project's own tests before a merge.
+
 ## System design
 
 ```
@@ -356,10 +472,13 @@ src/
 │   ├── permission.ts           # asker that queues prompts for the UI
 │   └── transcript.tsx, panel.tsx, permission-prompt.tsx, status-bar.tsx, lines.tsx
 ├── session/                    # JSONL session store, resume, the active session
+├── swarm/                      # ledger swarm: planner, worktrees, workers, merge queue, client
+├── server/                     # recorder that streams a session's turns to ledgerd
 └── config/, cli/
 
 checker/                        # Go module, no third-party deps
-├── main.go, protocol.go        # JSON-line loop and wire types
+├── cmd/grounding-checker/      # JSON-line loop that the CLI spawns
+├── protocol.go                 # wire types
 ├── claims.go                   # sentence split, hedges, negation, claim kinds, tags
 ├── evidence.go                 # command families, helpers
 ├── testsummary.go              # test runner summary parsers
@@ -367,12 +486,21 @@ checker/                        # Go module, no third-party deps
 ├── rule_*.go                   # one file per rule
 └── *_test.go                   # one test file per rule, plus parsers and attribution
 
+server/                         # Go service: verification, swarm state machine, dashboard
+├── proto/ledger/v1/            # VerifyService and SwarmService
+├── cmd/ledgerd, cmd/loadgen    # the server and its load generator
+└── internal/                   # store, queue, breaker, verify, orch, events, telemetry, web
+
+deploy/                         # Dockerfile, compose stack, prometheus config
+
 eval/
 ├── scenarios/                  # seeded fixture repos with ground truth
 ├── run.ts                      # records sessions as JSONL traces
 ├── label.ts                    # blind labeling CLI
 ├── judge.ts                    # optional LLM judge baseline
 ├── score.ts                    # offline replay, precision and recall
+├── import-openhands.ts, sample.ts, score-sampled.ts   # real traces at scale
+├── fleet.ts, score-fleet.ts    # gate on vs gate off experiment
 └── traces/, labels/, results/
 
 docs/design/                    # design docs

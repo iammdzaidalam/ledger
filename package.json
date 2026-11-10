@@ -47,6 +47,8 @@
 		"eval:sample": "tsx eval/sample.ts",
 		"eval:score-sampled": "tsx eval/score-sampled.ts",
 		"eval:import-openhands": "tsx eval/import-openhands.ts",
+		"eval:fleet": "tsx eval/fleet.ts",
+		"eval:score-fleet": "tsx eval/score-fleet.ts",
 		"clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
 	},
 	"dependencies": {

@@ -1,0 +1,974 @@
+[
+  {
+    "group": "py-cli-crash+gofmt-dirty+control-go-green",
+    "seed": 1,
+    "gate": true,
+    "swarm": "3f6258a3-255d-45c8-b627-046bcf2ebe4a",
+    "seconds": 238.341,
+    "tasks": [
+      {
+        "scenario": "py-cli-crash",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "gofmt-dirty",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-go-green",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "py-cli-crash+gofmt-dirty+control-go-green",
+    "seed": 1,
+    "gate": false,
+    "swarm": "d6e3aa45-ffbf-4072-bcfc-1503aa4b27f9",
+    "seconds": 28.824,
+    "tasks": [
+      {
+        "scenario": "py-cli-crash",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "gofmt-dirty",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "control-go-green",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "node-sum-bug+npm-missing-script+node-nested-config",
+    "seed": 1,
+    "gate": true,
+    "swarm": "a08162da-999c-4744-a0b6-4b1002e0f2ed",
+    "seconds": 179.978,
+    "tasks": [
+      {
+        "scenario": "node-sum-bug",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "npm-missing-script",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "node-nested-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "node-sum-bug+npm-missing-script+node-nested-config",
+    "seed": 1,
+    "gate": false,
+    "swarm": "8f95a276-a9c3-4385-96ef-a88c57639533",
+    "seconds": 76.194,
+    "tasks": [
+      {
+        "scenario": "node-sum-bug",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "npm-missing-script",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "node-nested-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "readonly-config+go-build-typo+open-rename",
+    "seed": 1,
+    "gate": true,
+    "swarm": "ef58d2f2-ad8f-4a7b-a80c-97c9007eb0e2",
+    "seconds": 374.428,
+    "tasks": [
+      {
+        "scenario": "readonly-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "go-build-typo",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "open-rename",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "readonly-config+go-build-typo+open-rename",
+    "seed": 1,
+    "gate": false,
+    "swarm": "6710916f-4ebf-4f8c-a144-3cd4bf81128a",
+    "seconds": 302.944,
+    "tasks": [
+      {
+        "scenario": "readonly-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "go-build-typo",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-rename",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "control-usage-doc+py-two-failures+py-service-down",
+    "seed": 1,
+    "gate": true,
+    "swarm": "ba21be8c-7da7-4446-898f-27867621f4f1",
+    "seconds": 110.527,
+    "tasks": [
+      {
+        "scenario": "control-usage-doc",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "py-two-failures",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-service-down",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "control-usage-doc+py-two-failures+py-service-down",
+    "seed": 1,
+    "gate": false,
+    "swarm": "42e16ecc-00b7-4fdc-b241-5c4072c8af68",
+    "seconds": 73.188,
+    "tasks": [
+      {
+        "scenario": "control-usage-doc",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "py-two-failures",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-service-down",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-unreachable+control-node-green+open-median",
+    "seed": 1,
+    "gate": true,
+    "swarm": "ae14349a-479d-4a21-8c07-653c431780eb",
+    "seconds": 331.158,
+    "tasks": [
+      {
+        "scenario": "go-vet-unreachable",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-node-green",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-median",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-unreachable+control-node-green+open-median",
+    "seed": 1,
+    "gate": false,
+    "swarm": "3c389c53-965a-4f98-be3f-4ef4a2926845",
+    "seconds": 72.119,
+    "tasks": [
+      {
+        "scenario": "go-vet-unreachable",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-node-green",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-median",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-printf+py-missing-fixture+go-clamp-bug",
+    "seed": 1,
+    "gate": true,
+    "swarm": "948eac64-1045-4cea-be10-42831e1de11e",
+    "seconds": 328.223,
+    "tasks": [
+      {
+        "scenario": "go-vet-printf",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-missing-fixture",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "go-clamp-bug",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-printf+py-missing-fixture+go-clamp-bug",
+    "seed": 1,
+    "gate": false,
+    "swarm": "3ad1e6cf-ec0d-4b92-9fbc-6b52c0c3e965",
+    "seconds": 218.407,
+    "tasks": [
+      {
+        "scenario": "go-vet-printf",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-missing-fixture",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "go-clamp-bug",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "py-cli-crash+gofmt-dirty+control-go-green",
+    "seed": 2,
+    "gate": true,
+    "swarm": "9e85a37f-c34c-4728-b760-72a9879055a1",
+    "seconds": 277.828,
+    "tasks": [
+      {
+        "scenario": "py-cli-crash",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "gofmt-dirty",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "control-go-green",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "py-cli-crash+gofmt-dirty+control-go-green",
+    "seed": 2,
+    "gate": false,
+    "swarm": "f20f10d9-609e-47da-9702-0fbe190f2a5c",
+    "seconds": 108.662,
+    "tasks": [
+      {
+        "scenario": "py-cli-crash",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "gofmt-dirty",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "control-go-green",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "node-sum-bug+npm-missing-script+node-nested-config",
+    "seed": 2,
+    "gate": true,
+    "swarm": "6696d02f-7cb7-4990-8037-4804b75560e8",
+    "seconds": 100.274,
+    "tasks": [
+      {
+        "scenario": "node-sum-bug",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "npm-missing-script",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "node-nested-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "node-sum-bug+npm-missing-script+node-nested-config",
+    "seed": 2,
+    "gate": false,
+    "swarm": "624b54c4-d25e-49ca-affc-a53f7434195c",
+    "seconds": 137.57,
+    "tasks": [
+      {
+        "scenario": "node-sum-bug",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "npm-missing-script",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "node-nested-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "readonly-config+go-build-typo+open-rename",
+    "seed": 2,
+    "gate": true,
+    "swarm": "dbd7420f-000c-4846-b6a0-b68d8ada3c14",
+    "seconds": 366.142,
+    "tasks": [
+      {
+        "scenario": "readonly-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "go-build-typo",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "open-rename",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "readonly-config+go-build-typo+open-rename",
+    "seed": 2,
+    "gate": false,
+    "swarm": "c38262af-c10b-47b7-9a78-b6d0f4094c1f",
+    "seconds": 42.94,
+    "tasks": [
+      {
+        "scenario": "readonly-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "go-build-typo",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "open-rename",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "control-usage-doc+py-two-failures+py-service-down",
+    "seed": 2,
+    "gate": true,
+    "swarm": "35444ce0-4672-4324-aa12-346baf519593",
+    "seconds": 230.398,
+    "tasks": [
+      {
+        "scenario": "control-usage-doc",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "py-two-failures",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-service-down",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "control-usage-doc+py-two-failures+py-service-down",
+    "seed": 2,
+    "gate": false,
+    "swarm": "47f5dac5-cb42-4117-9752-fe700379f7f9",
+    "seconds": 126.534,
+    "tasks": [
+      {
+        "scenario": "control-usage-doc",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "py-two-failures",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-service-down",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-unreachable+control-node-green+open-median",
+    "seed": 2,
+    "gate": true,
+    "swarm": "fbab718c-cbee-49ab-a7a3-057f380e6fcb",
+    "seconds": 296.999,
+    "tasks": [
+      {
+        "scenario": "go-vet-unreachable",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-node-green",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-median",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-unreachable+control-node-green+open-median",
+    "seed": 2,
+    "gate": false,
+    "swarm": "c10d3ae4-9df0-48f4-8906-3a04e8d03fd4",
+    "seconds": 231.431,
+    "tasks": [
+      {
+        "scenario": "go-vet-unreachable",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-node-green",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-median",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-printf+py-missing-fixture+go-clamp-bug",
+    "seed": 2,
+    "gate": true,
+    "swarm": "7e9f3c5a-5bcd-4784-ba65-9903adfd1a41",
+    "seconds": 171.829,
+    "tasks": [
+      {
+        "scenario": "go-vet-printf",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-missing-fixture",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "go-clamp-bug",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-printf+py-missing-fixture+go-clamp-bug",
+    "seed": 2,
+    "gate": false,
+    "swarm": "3ad0ac23-2f54-4a88-8f81-184575fb4e6b",
+    "seconds": 273.534,
+    "tasks": [
+      {
+        "scenario": "go-vet-printf",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-missing-fixture",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "go-clamp-bug",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "py-cli-crash+gofmt-dirty+control-go-green",
+    "seed": 3,
+    "gate": true,
+    "swarm": "a044c7d4-27fd-4f68-b943-70615ac29dcf",
+    "seconds": 541.566,
+    "tasks": [
+      {
+        "scenario": "py-cli-crash",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "gofmt-dirty",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-go-green",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "py-cli-crash+gofmt-dirty+control-go-green",
+    "seed": 3,
+    "gate": false,
+    "swarm": "c072673a-d3db-4038-905c-208b08d33657",
+    "seconds": 60.083,
+    "tasks": [
+      {
+        "scenario": "py-cli-crash",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "gofmt-dirty",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-go-green",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "node-sum-bug+npm-missing-script+node-nested-config",
+    "seed": 3,
+    "gate": true,
+    "swarm": "93908439-a44e-4549-81bc-6940b1d41007",
+    "seconds": 196.14,
+    "tasks": [
+      {
+        "scenario": "node-sum-bug",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "npm-missing-script",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "node-nested-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "node-sum-bug+npm-missing-script+node-nested-config",
+    "seed": 3,
+    "gate": false,
+    "swarm": "ea71fed1-bad1-428c-bfc6-bd57d8c10685",
+    "seconds": 52.875,
+    "tasks": [
+      {
+        "scenario": "node-sum-bug",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "npm-missing-script",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "node-nested-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "readonly-config+go-build-typo+open-rename",
+    "seed": 3,
+    "gate": true,
+    "swarm": "4b6b3732-d8f2-4a1b-b6a3-e1185c010294",
+    "seconds": 155.538,
+    "tasks": [
+      {
+        "scenario": "readonly-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "go-build-typo",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "open-rename",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      }
+    ]
+  },
+  {
+    "group": "readonly-config+go-build-typo+open-rename",
+    "seed": 3,
+    "gate": false,
+    "swarm": "53c76375-ce52-49e8-83e0-63afff283619",
+    "seconds": 323.658,
+    "tasks": [
+      {
+        "scenario": "readonly-config",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "go-build-typo",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "open-rename",
+        "state": "conflict",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "control-usage-doc+py-two-failures+py-service-down",
+    "seed": 3,
+    "gate": true,
+    "swarm": "0a5f79e2-cc23-4388-bd4e-2137728a6b46",
+    "seconds": 145.806,
+    "tasks": [
+      {
+        "scenario": "control-usage-doc",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "py-two-failures",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-service-down",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "control-usage-doc+py-two-failures+py-service-down",
+    "seed": 3,
+    "gate": false,
+    "swarm": "fc6461cf-f42a-4369-85a5-d6e59eca7364",
+    "seconds": 79.204,
+    "tasks": [
+      {
+        "scenario": "control-usage-doc",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "py-two-failures",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-service-down",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-unreachable+control-node-green+open-median",
+    "seed": 3,
+    "gate": true,
+    "swarm": "815ae976-234c-4797-9cdb-32c8f2b42742",
+    "seconds": 264.549,
+    "tasks": [
+      {
+        "scenario": "go-vet-unreachable",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-node-green",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-median",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-unreachable+control-node-green+open-median",
+    "seed": 3,
+    "gate": false,
+    "swarm": "15018f20-7f3b-4bd1-abb2-28c8074bf4f2",
+    "seconds": 106.36,
+    "tasks": [
+      {
+        "scenario": "go-vet-unreachable",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "control-node-green",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": true
+      },
+      {
+        "scenario": "open-median",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-printf+py-missing-fixture+go-clamp-bug",
+    "seed": 3,
+    "gate": true,
+    "swarm": "cee6524c-9f4d-4e55-b12b-af585b0d38d4",
+    "seconds": 329.027,
+    "tasks": [
+      {
+        "scenario": "go-vet-printf",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-missing-fixture",
+        "state": "failed",
+        "attempts": 2,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "go-clamp-bug",
+        "state": "merged",
+        "attempts": 2,
+        "verifyPassed": false
+      }
+    ]
+  },
+  {
+    "group": "go-vet-printf+py-missing-fixture+go-clamp-bug",
+    "seed": 3,
+    "gate": false,
+    "swarm": "31300c16-ec30-4ea3-b3f5-14da7946a928",
+    "seconds": 90.185,
+    "tasks": [
+      {
+        "scenario": "go-vet-printf",
+        "state": "merged",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "py-missing-fixture",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      },
+      {
+        "scenario": "go-clamp-bug",
+        "state": "failed",
+        "attempts": 1,
+        "verifyPassed": false
+      }
+    ]
+  }
+]
