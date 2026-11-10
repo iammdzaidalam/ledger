@@ -230,11 +230,11 @@ function parseFleet() {
 		if (!row) throw new Error(`no ${name} throughput row for ${clients} clients in README.md`);
 		return { rate: row[1].trim(), p50: row[2].trim(), clients };
 	};
-	const counts = readme.match(/has (\d+) retries and (\d+) failures, every one of them "no files were changed"/);
+	const counts = readme.match(/there were (\d+) retries and (\d+) failures of that kind/);
 	const model = readme.match(/with `([^`]+)` on Ollama once with the gate/);
 	if (!counts || !model) throw new Error("could not parse the fleet paragraph in README.md");
-	if (!/The checker flagged no turn in this run/.test(readme)) {
-		throw new Error("README.md no longer says the checker flagged no turn in the fleet run");
+	if (!/no flag ever caused a retry or a block/.test(readme)) {
+		throw new Error("README.md no longer says no flag caused a retry or a block in the fleet run");
 	}
 	return {
 		swarms: runs.length,

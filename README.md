@@ -467,7 +467,9 @@ outcomes. What the data does show:
   changed", none from catching a false claim. Across both settings there were
   32 retries and 14 failures of that kind: the 7B workers often exit without
   editing anything, and the gate sends them back once with a hint instead of
-  merging nothing. The checker flagged no turn in this run.
+  merging nothing. The checker did flag a turn in 5 of the gate-on attempts,
+  but each of those attempts ended on a clean turn (the gate only looks at the
+  last one), so no flag ever caused a retry or a block.
 - Nothing was blocked in either setting. The gate can only stop what the
   checker can see, and the failures here were code that does not build or does
   not fix the bug, with no test-success claim to contradict. About two thirds of

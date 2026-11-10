@@ -284,7 +284,7 @@
 	},
 	"record": {
 		"file": "server/internal/verify/service.go",
-		"line": 78,
+		"line": 79,
 		"lines": [
 			"func (s *Service) RecordTurn(ctx context.Context, req *connect.Request[ledgerv1.RecordTurnRequest]) (*connect.Response[ledgerv1.RecordTurnResponse], error) {",
 			"    m := req.Msg",

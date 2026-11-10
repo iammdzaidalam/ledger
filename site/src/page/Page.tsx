@@ -521,7 +521,7 @@ function FleetResults() {
 								<b>Every retry and failure was &ldquo;no files were changed&rdquo;.</b>
 								<span>
 									{fleet.retries} retries and {fleet.failures} failures. The 7B workers often exit without editing. The
-									checker flagged no turn.
+									checker did flag some turns, but no flag ever caused a retry or a block.
 								</span>
 							</li>
 							<li>
