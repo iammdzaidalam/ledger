@@ -98,7 +98,14 @@ export function ensureChecker(): Promise<void> {
 		void go.run(instance);
 		for (let i = 0; i < 100 && !window.ledgerCheck; i++) await new Promise((r) => setTimeout(r, 10));
 		if (!window.ledgerCheck) throw new Error("the checker did not start");
-		window.ledgerCheck(JSON.stringify({ turn_text: "warm up", evidence: [], fresh_refs: [] }));
+		const warm = JSON.stringify({
+			turn_text: "All tests pass. I fixed the bug in src/a.js.",
+			evidence: [
+				{ ref: "c1", seq: 1, tool: "Bash", args: { command: "npm test" }, raw_stdout: "Tests 2 failed, 5 passed", raw_stderr: "", exit_code: 1, executed: true, is_error: false, duration_ms: 1 },
+			],
+			fresh_refs: ["c1"],
+		});
+		for (let i = 0; i < 6; i++) window.ledgerCheck(warm);
 		set("ready");
 	})().catch((error) => {
 		set("failed");
@@ -111,5 +118,12 @@ export function ensureChecker(): Promise<void> {
 export function runCheck(req: CheckRequest): CheckResponse | null {
 	const fn: CheckFn | undefined = typeof window === "undefined" ? (globalThis as { ledgerCheck?: CheckFn }).ledgerCheck : window.ledgerCheck;
 	if (!fn) return null;
-	return JSON.parse(fn(JSON.stringify(req))) as CheckResponse;
+	const body = JSON.stringify(req);
+	const first = JSON.parse(fn(body)) as CheckResponse;
+	if (typeof window === "undefined") return first;
+	const runs = 20;
+	const started = performance.now();
+	for (let i = 0; i < runs; i++) fn(body);
+	const each = ((performance.now() - started) * 1000) / runs;
+	return { ...first, latency_us: Math.max(1, Math.round(each)) };
 }

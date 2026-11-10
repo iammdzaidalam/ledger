@@ -150,7 +150,7 @@ export function checkerSteps(input: CheckerInput): AppStep[] {
 		{
 			phase: "Response",
 			title: `Checked in ${latency(result.latency_us)}`,
-			desc: `The wasm build of the same Go checker answered in ${latency(result.latency_us)}${input.browserTimed ? ", timed in this tab" : ", timed when the site was built"}. No model call is involved.`,
+			desc: `The wasm build of the same Go checker answered in ${latency(result.latency_us)}${input.browserTimed ? ", the mean of 20 runs timed in this tab" : ", timed when the site was built"}. No model call is involved.`,
 			src: "evaluate",
 			nodes: ["verdict"],
 			edges: [],
