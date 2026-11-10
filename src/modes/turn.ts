@@ -9,6 +9,7 @@ import type { ClaimsMode } from "../grounding/types.js";
 import type { RunLedger, ValidationMode } from "../grounding/validation.js";
 import type { PermissionGate } from "../permissions/types.js";
 import type { Provider } from "../providers/types.js";
+import { observe, recorderFor } from "../server/recorder.js";
 import type { ActiveSession } from "../session/active.js";
 
 export interface TurnSettings {
@@ -74,6 +75,7 @@ export async function runTurn(
 	signal?: AbortSignal,
 ): Promise<RunLedger | undefined> {
 	await session.addUserMessage(input);
+	const recorder = recorderFor(session, input);
 	let ledger: RunLedger | undefined;
 	const limit =
 		settings.autoCompact === false
@@ -101,6 +103,7 @@ export async function runTurn(
 	let ended = false;
 	for await (const event of untilAborted(events, signal)) {
 		await session.record(event);
+		observe(recorder, event, session.evidence);
 		if (event.type === "agent_end") {
 			ended = true;
 			ledger = event.ledger;

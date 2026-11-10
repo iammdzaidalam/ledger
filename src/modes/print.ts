@@ -6,6 +6,7 @@ import { createPolicy, NO_TERMINAL_REASON } from "../permissions/policy.js";
 import { terminalAsker } from "../permissions/prompt.js";
 import type { PermissionRequest, PermissionSettings } from "../permissions/types.js";
 import { readableError } from "../providers/errors.js";
+import { flushRecorders } from "../server/recorder.js";
 import type { ActiveSession } from "../session/active.js";
 import { runTurn, type TurnSettings } from "./turn.js";
 
@@ -62,5 +63,6 @@ export async function runPrint(options: PrintOptions): Promise<number> {
 	} finally {
 		groundingClient.close();
 		rl?.close();
+		await flushRecorders();
 	}
 }

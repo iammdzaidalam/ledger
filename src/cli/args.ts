@@ -7,6 +7,7 @@ export interface ParsedArgs {
 	claims?: string;
 	validate?: string;
 	maxRevisions?: string;
+	server?: string;
 	continue: boolean;
 	listSessions: boolean;
 	yes: boolean;
@@ -19,7 +20,7 @@ export interface ParsedArgs {
 
 const VALUE_FLAGS: Record<
 	string,
-	"provider" | "model" | "session" | "resume" | "claims" | "validate" | "maxRevisions"
+	"provider" | "model" | "session" | "resume" | "claims" | "validate" | "maxRevisions" | "server"
 > = {
 	"--provider": "provider",
 	"--model": "model",
@@ -29,6 +30,7 @@ const VALUE_FLAGS: Record<
 	"--claims": "claims",
 	"--validate": "validate",
 	"--max-revisions": "maxRevisions",
+	"--server": "server",
 };
 
 const BOOLEAN_FLAGS: Record<
@@ -90,6 +92,8 @@ export const HELP_TEXT = `ledger [message]            Interactive terminal UI (d
 ledger --print [message]    One-shot: stream the answer to stdout
 echo "..." | ledger -p      Read the prompt from a pipe
 ledger sessions             List saved sessions in this directory
+ledger swarm "<goal>"       Split a goal into subtasks, run them in parallel
+                            git worktrees, gate and merge the results
 
 Options
   --provider <name>   claude (default), gemini, groq, or ollama
@@ -107,12 +111,29 @@ Options
                       for the model to correct, strict also exits 2 in
                       print mode if any are still false at the end
   --max-revisions <n> Revisions allowed per flagged turn (default 1)
+  --server <url>      Send each turn to a ledger server for checking
+                      (also LEDGER_SERVER)
   --feedback          Same as --validate revise
   --print, -p         Non-interactive output
   --no-tui            Use the plain line-by-line REPL instead of the
                       full-screen UI (also "tui": false in settings)
   --version, -v
   --help, -h
+
+Swarm options (ledger swarm "<goal>" [options])
+  --workers <n>       Parallel workers (default 3)
+  --plan <n>          Ask the model for at most n subtasks (default: workers)
+  --subtask <text>    Give a subtask yourself instead of planning; repeatable
+  --max-attempts <n>  Attempts per subtask before it is failed (default 3)
+  --no-gate           Merge finished subtasks without the server's check
+  --base <ref>        Start from this ref instead of HEAD
+  --server <url>      Ledger server (default $LEDGER_SERVER or
+                      http://localhost:8080)
+  --resume <id>       Attach to a swarm that is already running
+  --json              Print the final swarm state as JSON
+  --provider, --model Same as above; used by the workers
+  Exits 0 when every subtask is merged and 2 otherwise. Results land on
+  the branch ledger/<id>/integration; your checkout is not touched.
 
 In the UI or the REPL, /help lists the slash commands.
 `;

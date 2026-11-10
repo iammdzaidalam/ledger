@@ -18,6 +18,7 @@ import {
 	resolveSessionId,
 } from "./session/store.js";
 import type { SessionData } from "./session/types.js";
+import { parseSwarmArgs } from "./swarm/args.js";
 
 async function readStdin(): Promise<string> {
 	if (process.stdin.isTTY) return "";
@@ -41,7 +42,7 @@ async function savedSession(args: ParsedArgs): Promise<SessionData | null> {
 }
 
 function pickModel(
-	args: ParsedArgs,
+	args: Pick<ParsedArgs, "provider" | "model">,
 	settings: Settings,
 	saved: SessionData | null,
 ): { provider: string; model: string } {
@@ -83,8 +84,22 @@ export function shouldUseTui(
 	return !args.noTui && settings.tui !== false && stdinTTY && stdoutTTY;
 }
 
+async function runSwarm(argv: string[]): Promise<void> {
+	if (argv.includes("--help") || argv.includes("-h")) {
+		console.log(HELP_TEXT);
+		return;
+	}
+	const swarmArgs = parseSwarmArgs(argv);
+	const choice = pickModel(swarmArgs, await loadSettings(), null);
+	const { runSwarmCommand } = await import("./swarm/run.js");
+	process.exitCode = await runSwarmCommand(swarmArgs, choice);
+}
+
 export async function main(): Promise<void> {
-	const args = parseArgs(process.argv.slice(2));
+	const argv = process.argv.slice(2);
+	if (argv[0] === "swarm") return runSwarm(argv.slice(1));
+	const args = parseArgs(argv);
+	if (args.server) process.env.LEDGER_SERVER = args.server;
 
 	if (args.help) {
 		console.log(HELP_TEXT);
