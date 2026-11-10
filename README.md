@@ -1,6 +1,6 @@
 # Ledger
 
-A terminal coding agent that checks its own claims before you have to.
+A terminal coding agent that checks what it says against what it actually did.
 
 The agent runs `npm test`. It exits 1 with two failing tests. The agent replies
 "All tests pass." Ledger prints this right under that reply:
@@ -9,11 +9,14 @@ The agent runs `npm test`. It exits 1 with two failing tests. The agent replies
 [FALSE CLAIM] tests_pass c3 | model said: "All tests pass." | evidence: `npm test` exited 1 (vitest: 5 passed, 2 failed)
 ```
 
-That check is deterministic, takes about a millisecond, and costs nothing: no
-second model call.
+The check is a fixed set of rules, not another model. It takes about 0.1 ms per
+turn and costs nothing.
 
-Try the checker and replay recorded swarms in the browser at
-[ledger-psi-umber-17.vercel.app/playground.html](https://ledger-psi-umber-17.vercel.app/playground.html).
+**Try it in your browser:** the [playground](https://ledger-psi-umber-17.vercel.app/playground.html)
+runs the real checker (compiled to WebAssembly) on recorded sessions or on text
+you type, and replays recorded runs of parallel agents. The
+[project site](https://ledger-psi-umber-17.vercel.app) has the overview and the
+results. Both are also on [GitHub Pages](https://iammdzaidalam.github.io/ledger/).
 
 ```bash
 git clone https://github.com/iammdzaidalam/ledger && cd ledger
@@ -23,41 +26,112 @@ echo "explain the agent loop" | ledger -p
 ledger --provider ollama --model qwen2.5:7b   # fully local
 ```
 
----
-
 ## Contents
 
-- [Overview](#overview)
+- [What Ledger does](#what-ledger-does)
+- [How it is built](#how-it-is-built)
 - [How a claim gets checked](#how-a-claim-gets-checked)
 - [The rules](#the-rules)
-- [Evaluation](#evaluation)
-- [Fleet: parallel agents behind the gate](#fleet-parallel-agents-behind-the-gate)
-- [System design](#system-design)
-- [Project layout](#project-layout)
+- [How well it works](#how-well-it-works)
+- [Ledger Fleet: several agents at once](#ledger-fleet-several-agents-at-once)
 - [Getting started](#getting-started)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Tools](#tools)
 - [Supported models](#supported-models)
+- [Project layout](#project-layout)
 - [Development](#development)
 - [Design notes](#design-notes)
 
-## Overview
+## What Ledger does
 
-Most agent loops stream a tool's raw output back into the model's context and
-hope it gets read correctly. Nothing stops the model from saying "tests pass"
-when the exit code was 1, "created config.json" when the write failed with
-EACCES, or "fixed it" when nothing was rerun after the edit.
+Coding agents often report results they never got. A model can say "tests
+pass" when the exit code was 1, "created config.json" when the write failed
+with a permission error, or "fixed it" when nothing was rerun after the edit.
 
-Ledger records every Bash, Write, Edit and git call as evidence: exit code,
-stdout, stderr, whether it ran at all, and for file edits a real unified diff. At the
-end of each assistant turn, a small Go binary pulls the claims out of what the
-model said and checks each one against that evidence. Anything that does not
-hold up is flagged in the terminal right under the message. With
-`--validate revise` it goes back to the model with the exact fact it got
-wrong, and the revised answer is checked again. When the run ends, Ledger
-prints the ledger: every claim the model made, its final verdict, and whether
-it was corrected.
+Ledger records every Bash, Write, Edit and git call the agent makes as
+evidence: the exit code, the output, whether the command ran at all, and for
+file edits the real diff. When the model finishes a turn, a small Go program
+reads what it said, pulls out each claim ("tests pass", "file created", "bug
+fixed") and compares it with the evidence. A claim the evidence contradicts is
+flagged under the message. With `--validate revise`, Ledger also sends the
+model the exact fact it got wrong and checks the corrected answer. When the run
+ends, Ledger prints a summary of every claim and whether it held up.
+
+Ledger also runs several agents in parallel, each on its own copy of the
+repository, and only merges the work of an agent whose last turn passed the
+check. That part is described in [Ledger Fleet](#ledger-fleet-several-agents-at-once).
+
+## How it is built
+
+Ledger has three parts:
+
+- **The agent** (TypeScript, in `src/`). It talks to the model, runs tools,
+  asks permission before changing anything, and shows the result in a terminal
+  UI. It works with Claude, Gemini, Groq, or local models through Ollama.
+- **The checker** (Go, in `checker/`). It has no outside dependencies. The
+  agent starts it once and sends it each turn's text and evidence as one line
+  of JSON; it replies with one verdict per claim.
+- **The Fleet service** (Go, in `server/`, called `ledgerd`). It stores runs and
+  verdicts in Postgres, keeps the state of parallel runs, and serves a live
+  dashboard.
+
+```
+                  ┌──────────────────────────────────────────────┐
+   CLI args  ───▶ │                  main()                       │
+   stdin     ───▶ │   parse args · load settings · build prompt   │
+                  └───────────────┬────────────────┬──────────────┘
+                                  │                │
+                        print mode│      interactive UI or REPL
+                                  ▼                ▼
+                  ┌────────────────────────────────────────────────┐
+                  │                 runAgent()                      │
+                  │  stream → check turn's claims → run tools →     │
+                  │  record evidence → append results → repeat      │
+                  └───────┬───────────────────────────┬────────────┘
+                          │ StreamEvent                │ tool call
+                          ▼                            ▼
+              ┌───────────────────────┐    ┌──────────────────────┐
+              │       Provider         │    │     Tool registry     │
+              │ claude gemini groq     │    │ Read Write Edit Bash  │
+              │ ollama                 │    │ Grep Find Ls Git*     │
+              └───────────────────────┘    └──────────┬────────────┘
+                                                       │ Bash Write Edit
+                                                       ▼
+                                             ┌──────────────────────┐
+                                             │     EvidenceLog       │
+                                             │  c1 c2 c3 ... + diff  │
+                                             └──────────┬────────────┘
+                                   turn text + evidence  ▼
+                                             ┌──────────────────────┐
+                                             │  grounding checker     │
+                                             │  Go, JSON lines over   │
+                                             │  stdin/stdout          │
+                                             └──────────┬────────────┘
+                                                        ▼
+                                          one verdict per claim, flags
+                                          rendered, false ones optionally
+                                          sent back and the revision rechecked
+```
+
+Two streams of events connect the pieces:
+
+- **`StreamEvent`** is what a provider produces: text, the start, input and
+  end of each tool call, and the end of the message.
+- **`AgentEvent`** is what the agent loop produces for a screen: text, tool
+  start and end, evidence, the checker's verdicts, revision requests, and the
+  end of the run with its summary.
+
+A new provider never touches the agent loop, and a new screen never touches
+the providers or the checker. The evaluation recorder is just another consumer
+of `AgentEvent`.
+
+**Why the checker is in Go.** The agent loop spends nearly all its time waiting
+on the network, so TypeScript suits it. The checker runs on every turn and has
+to be fast, exact and easy to test by itself. One long-running Go program that
+speaks JSON lines has no dependencies and is tested with `go test`.
+
+For the parallel-agent service, see [Ledger Fleet](#ledger-fleet-several-agents-at-once).
 
 ## How a claim gets checked
 
@@ -157,103 +231,104 @@ Test summaries are parsed for vitest, jest, pytest, go test, `node --test`,
 unittest, cargo and mocha. A custom script whose output contains one of those
 summaries counts as a test run too.
 
-## Evaluation
+## How well it works
 
-The question the eval answers: on real agent sessions, how many false success
-claims does the checker catch, and how often is it wrong?
+Two terms are used below. **Precision** is how often a flagged turn really
+contains a false claim. **Recall** is how many of the turns that contain a false
+claim get flagged. A checker with high precision and low recall rarely
+cries wolf but misses things; the reverse flags too much.
 
-**Setup.** 20 seeded scenarios in `eval/scenarios/`, each a tiny repo with a
-known ground truth: a failing test with a real bug, a test that needs a service
-that does not exist, a missing `npm test` script, a `go vet` error, a
-read-only directory, a test that hangs, `gofmt` drift, plus true-success
-controls where the claims are true (so false positives can show up) and two
-open-ended tasks. Scenarios are split into dev (rules were tuned on these),
-held-out (scored once, in run1) and fresh (six written after the last rule
-change, recorded as run2 and scored once). Sessions run on local models through Ollama with
-`num_ctx`, `num_predict`, temperature and seed pinned and recorded in every
-trace, inside a sandbox that only lets the agent write to its scratch dir.
+**Controlled runs.** 20 small repositories in `eval/scenarios/`, each with a
+known answer: a failing test with a real bug, a test that needs a service that
+does not exist, a missing `npm test` script, a `go vet` error, a read-only
+directory, a test that hangs, `gofmt` drift, and control repositories where the
+agent's claims are true (so wrong flags show up). The scenarios are split into
+three groups. Dev scenarios were used to tune the rules. Held-out scenarios
+were scored once. Fresh scenarios were written after the last rule change and
+scored once. Sessions run on local models through Ollama, with the context size,
+output limit, temperature and seed pinned and written into every trace, in a
+sandbox that only lets the agent write to its scratch directory.
 
-**Labels.** Every assistant turn is labeled blind, without the checker's
-verdict, with the kinds of false claim it contains (`eval/LABELING.md`). The
-unit is one assistant turn and one claim kind. Traces are replayed through the
-current checker offline, so changing a rule never needs a model rerun.
+Every assistant turn is labelled by an annotator who does not see the
+checker's verdict, using the rules in `eval/LABELING.md`. The traces are
+replayed through the current checker offline, so changing a rule never needs a
+new model run.
 
-**Runs.** run1 is 168 sessions across qwen2.5:3b, qwen2.5:7b and
-llama3.1:8b, with 303 assistant turns that contain text (161 held-out, 142
-dev). run2 is 72 sessions on the six fresh scenarios, with 134 such turns.
-Replayed through the current checker, run1 has claims in 51 turns and 24 flags
-across 18 turns; run2 has claims in 13 turns and 7 flags across 6 turns.
-Checker latency per turn is 0.1 to 0.2 ms at p50 and 0.3 ms at p95, with zero
-LLM calls.
-
-**Precision and recall.** Labels say which turns hold a false claim; the
-checker and an LLM judge are scored against them, per turn.
+- **run1:** 168 sessions on qwen2.5:3b, qwen2.5:7b and llama3.1:8b, with 303
+  assistant turns that contain text (161 held-out, 142 dev).
+- **run2:** 72 sessions on the six fresh scenarios, with 134 such turns.
+- **Speed:** 0.1 to 0.2 ms per turn at the median and 0.3 ms at the 95th
+  percentile, with no model call.
 
 | Measurement | Checker precision | Checker recall | LLM judge precision | LLM judge recall |
 |---|---|---|---|---|
 | run1 held-out, before any fix (161 turns) | 60% (3/5) | 23% (3/13) | 10% (13/134) | 100% (13/13) |
 | run2 fresh scenarios, after the fixes (134 turns) | 67% (4/6) | 57% (4/7) | 7% (7/102) | 100% (7/7) |
 
-The checker costs 0.1 ms per turn with no model call. The judge is qwen2.5:7b
-on the same machine, at about 0.7 s per turn. With 6 to 13 false turns per row the
-intervals are wide; `eval/results/run1-before-fixes.md` and
-`eval/results/run2.md` have them per rule.
+The "LLM judge" is qwen2.5:7b asked to flag false claims, as a comparison; it
+takes about 0.7 s per turn. With only 6 to 13 false turns per row the ranges
+are wide; `eval/results/run1-before-fixes.md` and `eval/results/run2.md` give
+them per rule.
 
-How the rows were made. run1's held-out turns were scored once, blind, and
-that score is kept in `run1-before-fixes.md`. Reading the misses then led to
-four checker fixes (see LEARNINGS.md). Six of the ten misses were formatting
-claims such as "no files need formatting" that the extractor never picked
-up. After that run1 was no longer a fair test, so six new scenarios were
-written and recorded as run2 (72 sessions, the `fresh` split), and scored
-once with the fixed checker. `eval/results/run1.md` shows run1 with the fixed
-checker for reference; it is not a held-out number.
+How the rows were made: run1's held-out turns were scored once and that score
+is kept. Reading the misses led to four checker fixes (see LEARNINGS.md); six
+of the ten misses were formatting claims such as "no files need formatting"
+that the claim extractor never picked up. After that, run1 was no longer a fair
+test, so six new scenarios were written, recorded as run2 and scored once with
+the fixed checker. `eval/results/run1.md` shows run1 with the fixed checker for
+reference; it is not a held-out number.
 
-The labels come from Claude annotators, not a person yet. Two independent
-passes labeled every scored turn blind, from the same packets `eval:label`
-shows, and disagreed on one turn of 295 (Cohen's kappa 0.97). They are the
-same model, so that agreement says less than two people agreeing would. The
-disputed turn ("Not all 12 tests pass" when 2 ran) moves run2 recall between
-57% and 67%. `npm run eval:label` writes `eval/labels/human.jsonl`, which
-`eval:score` prefers.
+**Who did the labelling.** The labels come from Claude models, not people yet.
+Two independent passes labelled every scored turn and disagreed on one turn of
+295. Because it is the same model both times, that agreement says less than two
+people agreeing would. The one disputed turn ("Not all 12 tests pass" when 2
+ran) moves run2 recall between 57% and 67%. `npm run eval:label` writes
+`eval/labels/human.jsonl`, which the scoring script prefers when it exists.
 
-What the numbers say: when the checker flags a turn it is right about two
-times in three, and it now catches a bit over half of the false turns. The
-LLM judge catches every one but flags three of every four turns, so most of
-its flags are noise. On run2 the checker's two wrong flags were "fixed" used
-as an adjective inside a tool call printed as text, and "The other test
-passed." after a run where one test passed and one failed. Its misses were
-"the type mismatch issue has been addressed" with no rebuild, and "Bash
-command executed to run tests" with no command at all.
+What the numbers say: when the checker flags a turn it is right about two times
+in three, and it catches a bit over half the false turns. The judge catches
+every one but flags three of every four turns, so most of its flags are noise.
+On run2 the checker's two wrong flags were the word "fixed" used as an
+adjective inside a tool call printed as text, and "The other test passed."
+after a run where one test passed and one failed. Its misses were "the type
+mismatch issue has been addressed" with no rebuild, and "Bash command executed
+to run tests" with no command at all.
 
-**Real traces at scale.** run1 and run2 hold 13 and 7 false turns, too few to
-trust. So the frozen checker was also run on 300 trajectories from
+**Real sessions at scale.** run1 and run2 contain only 13 and 7 turns with a
+false claim, too few to trust. So the frozen checker was also run on 300
+sessions from
 [nebius/SWE-rebench-openhands-trajectories](https://huggingface.co/datasets/nebius/SWE-rebench-openhands-trajectories)
-(CC-BY-4.0): Qwen3-Coder-480B in OpenHands working on real GitHub issues,
-13,664 assistant turns. Every flagged turn (404), 600 of the 1,480 with a
-verified claim and 1,000 of the 11,780 with no claim were labeled blind, then
-weighted back to the full set (`eval/results/openhands.md`).
+(CC-BY-4.0): Qwen3-Coder-480B working on real GitHub issues in OpenHands,
+13,664 assistant turns. All 404 flagged turns, 600 of the 1,480 turns with a
+verified claim, and 1,000 of the 11,780 turns with no claim were labelled, then
+weighted back up to the full set (`eval/results/openhands.md`).
 
 | 13,664 real turns | Precision | Recall | Cost per turn |
 |---|---|---|---|
 | Ledger checker | 21% (17-24%) | 31% (23-37%) | 0.1 ms, no model call |
-| qwen2.5:7b as an LLM judge (400-turn stratified subset) | 4% (2-7%) | 100% | 11 s, flags 93% of turns |
+| qwen2.5:7b as an LLM judge (400-turn sample) | 4% (2-7%) | 100% | 11 s, flags 93% of turns |
 
-About 2% of turns hold a false claim. The checker does far worse here than on
-the small local-model runs, and the reasons are specific. OpenHands writes a
-new reproduction or test script after a fix, and the checker counts that new
-file as a code change, so "Fixed X" after a passing run reads as unsupported.
-"I've successfully reproduced the issue" after a script that exits 1 is true,
-but command_success calls it a lie. And scoped claims ("all other tests pass",
-a count quoted from an earlier run) are checked against the latest run. A small
-local judge is no better: it flags almost everything. Two annotator passes
-agreed on 292 of 300 shared turns (kappa 0.75).
+About 2% of turns hold a false claim. The checker does much worse here than on
+the small local-model runs, for three specific reasons:
 
-I then fixed the first two patterns and part of the third, and measured on 150
-new trajectories (6,867 turns, `eval/results/openhands-b.md`): 20% precision
-(14-26%) and 30% recall (17-46%), against 19% and 41% for the frozen checker on
-the same turns. The fixes removed false flags but did not move the totals, so
-the headline number stays at 21%. What remains needs a "full suite" notion that
-a regex over the claim sentence cannot give.
+- OpenHands often writes a new reproduction or test script after a fix, and the
+  checker counts that new file as a code change, so "Fixed X" after a passing
+  run reads as unsupported.
+- "I've successfully reproduced the issue" after a script that exits 1 is true
+  (the point was to reproduce a failure), but the `command_success` rule calls
+  it a lie.
+- Narrow claims such as "all other tests pass" or a count quoted from an
+  earlier run are checked against the latest run.
+
+A small local judge is no better; it flags almost everything. Two annotator
+passes agreed on 292 of 300 shared turns.
+
+I fixed the first two patterns and part of the third, then measured on 150 new
+sessions (6,867 turns, `eval/results/openhands-b.md`): 20% precision (14-26%)
+and 30% recall (17-46%), against 19% and 41% for the unfixed checker on the same
+turns. The fixes removed some wrong flags but did not move the totals, so the
+headline stays at 21%. What remains needs an idea of "the full test suite" that
+pattern matching on a sentence cannot provide.
 
 Reproduce:
 
@@ -269,20 +344,26 @@ npm run eval:run -- --out eval/traces/run2 --modes prose,tagged --seeds 1,2 --sc
 npm run eval:score -- --labels human,claude-a --judges ollama-qwen2.5-7b
 ```
 
-## Fleet: parallel agents behind the gate
+## Ledger Fleet: several agents at once
 
-`ledger swarm` splits one goal into subtasks and runs each in its own git
-worktree. A Go service decides, from the checker's verdicts on each attempt's
-turns, whether the attempt may be merged, must retry with the flagged claims
-as feedback, or is blocked.
+`ledger swarm` takes one goal, splits it into smaller tasks, and runs one agent
+per task. Each agent works in its own git worktree (a separate checkout of the
+same repository), so they cannot overwrite each other. A Go server called
+`ledgerd` keeps track of every task and attempt. When an agent finishes, the
+server looks at the checker's verdict on its last turn and decides whether its
+work may be merged, must be retried, or is rejected.
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d        # postgres, redis, ledgerd, prometheus, jaeger
 ledger swarm "add input validation to the CLI and update the docs" --workers 3 \
   --server http://localhost:8080 --provider ollama --model qwen2.5:7b
 ledger swarm "..." --subtask "fix the parser bug" --subtask "document the flags"
-open http://localhost:8080                               # live lanes, attempts, blocked claims
+open http://localhost:8080                               # live view of tasks, attempts and flagged claims
 ```
+
+You can also replay recorded runs in the [playground](https://ledger-psi-umber-17.vercel.app/playground.html#swarm/1/on/0).
+
+### Architecture
 
 ```
 ledger swarm (planner, N workers, merge queue)          dashboard, SSE /events
@@ -294,72 +375,84 @@ ledgerd  SwarmService: tasks -> attempts -> gate -------------+
          Prometheus /metrics, OpenTelemetry (OTLP) when configured
 ```
 
-How a swarm runs:
+- **`ledger swarm`** is the client. It plans the tasks, starts the workers, and
+  merges finished branches.
+- **`ledgerd`** is the server. It exposes two services over Connect, which
+  speaks gRPC and plain JSON over HTTP. `VerifyService` runs the checker on a
+  turn and stores the verdict. `SwarmService` holds the state of every swarm.
+- **Postgres** stores everything that must survive a crash: runs, turns,
+  verdicts, swarms, tasks, attempts and queued jobs.
+- **Redis** carries live events to the dashboard. Without Redis, events stay in
+  memory and everything else still works.
+- **Prometheus and OpenTelemetry** provide metrics and traces. Tracing is off
+  unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 
-- **Plan.** The planner asks the model for independent subtasks and falls back
-  to one subtask if the answer is unusable. `--subtask` skips planning.
-- **Workers pull.** A worker claims an attempt with a lease, creates the
-  worktree and branch `ledger/<swarm>/<n>`, runs the agent as a child process
-  with `--validate strict`, and heartbeats. Every turn is recorded on the
-  server under the attempt's run id. If a worker dies, the lease expires and
-  another worker picks the attempt up, so a run survives crashes.
-- **Gate.** On completion the server looks at the last turn's verdicts. Clean
-  and committed passes. Flagged with attempts left retries, and the next
-  attempt continues from the previous commit with the checker's reasons in its
-  prompt. Flagged on the last attempt is blocked. An attempt that changed no
-  file retries once with a hint, then fails. `--no-gate` merges whatever a
-  worker committed, which is the baseline for the experiment below.
-- **Merge queue.** Passed branches are merged one at a time into
-  `ledger/<swarm>/integration` with `git merge --no-ff`. A conflict aborts
-  cleanly and the task is marked conflicted. Your checked-out branch and
-  working tree are never touched.
-- **Idempotent and resumable.** The swarm is keyed by goal and base commit, so
-  rerunning after a crash attaches to the same swarm. `--resume <id>` does the
-  same by id.
+### How a swarm runs
 
-Server settings (environment): `LEDGER_DATABASE_URL`, `LEDGER_ADDR`,
-`LEDGER_REDIS_URL` (events fall back to memory without it),
-`OTEL_EXPORTER_OTLP_ENDPOINT` (tracing is off without it), and
-`LEDGER_JUDGE_MODEL`/`LEDGER_JUDGE_URL` to run an LLM judge next to the
-checker through the job queue.
+1. **Plan.** The planner asks the model for independent subtasks. If the answer
+   is unusable it falls back to one task. `--subtask` skips planning.
+2. **Work.** A worker claims a task from the server for a limited time (a
+   lease), creates a worktree on branch `ledger/<swarm>/<n>`, and runs the agent
+   as a child process with `--validate strict`. While it runs, the worker sends
+   a heartbeat to renew the lease, and every turn is recorded on the server.
+   If a worker dies, the lease runs out and another worker takes the task, so a
+   run survives a crash.
+3. **Decide.** When the agent exits, the server checks the last turn:
+   - clean and committed: the task **passes**;
+   - flagged and attempts remain: **retry**, continuing from the previous
+     commit with the checker's reasons added to the prompt;
+   - flagged on the last attempt: **blocked**;
+   - no files changed: retry once with a hint, then **fail**.
 
-Choices worth knowing:
+   `--no-gate` merges whatever a worker committed. That is the baseline for the
+   experiment below.
+4. **Merge.** Passed branches are merged one at a time into
+   `ledger/<swarm>/integration`. A conflict is rolled back and the task is
+   marked as conflicted. Your own branch and working tree are never touched.
+5. **Resume.** A swarm is identified by its goal and base commit, so running the
+   same command after a crash reattaches to it. `--resume <id>` does the same.
 
-- **Postgres as the queue.** Jobs and attempts are claimed with
-  `FOR UPDATE SKIP LOCKED` and a lease. At this volume that gives a durable,
-  concurrent queue without running Kafka. It would stop being enough when
-  claims, not checks, become the bottleneck.
-- **Workers pull instead of being pushed to.** Leases make a crashed worker
-  harmless and let workers run on any machine that can reach the server.
-- **The judge sits behind a circuit breaker.** When the model endpoint fails,
-  jobs are parked without spending their retry budget and the breaker probes
-  with one call at a time.
-- **Turn ingest is idempotent.** The same turn replayed returns the stored
-  verdict; the same turn id with different text is rejected.
+Server settings are environment variables: `LEDGER_DATABASE_URL`,
+`LEDGER_ADDR`, `LEDGER_REDIS_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and
+`LEDGER_JUDGE_MODEL` / `LEDGER_JUDGE_URL` to run an LLM judge next to the
+checker.
+
+### Design choices
+
+| Choice | Why |
+|---|---|
+| Postgres as the job queue | Jobs are claimed with `FOR UPDATE SKIP LOCKED`, which lets many workers take different jobs without blocking each other. It is durable and needs no extra system. It stops being enough when claiming jobs, rather than checking them, becomes the bottleneck. |
+| Workers pull work | A crashed worker only loses its lease, and workers can run on any machine that can reach the server. |
+| Repeated requests are safe | Creating a swarm with the same key returns the existing swarm. Sending the same turn twice returns the stored verdict, and the same turn id with different text is rejected. |
+| The optional LLM judge sits behind a circuit breaker | If the model endpoint fails, jobs wait without using up their retries, and the breaker tries one call at a time until it recovers. |
+| One merge at a time | Merges into the integration branch cannot race each other, and a conflict only affects its own task. |
+
+### Performance
 
 Measured on one laptop (Apple M5, Postgres in Docker, 12 tool calls per turn,
-`server/cmd/loadgen`):
+using `server/cmd/loadgen`):
 
 | | Throughput | p50 | p99 |
 |---|---|---|---|
-| `Check` (stateless, 32 clients) | 21-25k/s | 1.0 ms | 5.7 ms |
-| `RecordTurn` (persisted, 8 clients) | 3.6k/s | 2.1 ms | 4.1 ms |
-| `RecordTurn` (persisted, 32 clients) | 3.9k/s | 7.9 ms | 13.4 ms |
-| `RecordTurn` (persisted, 128 clients) | 3.6k/s | 34 ms | 71 ms |
+| `Check` (no storage, 32 clients) | 21-25k/s | 1.0 ms | 5.7 ms |
+| `RecordTurn` (stored, 8 clients) | 3.6k/s | 2.1 ms | 4.1 ms |
+| `RecordTurn` (stored, 32 clients) | 3.9k/s | 7.9 ms | 13.4 ms |
+| `RecordTurn` (stored, 128 clients) | 3.6k/s | 34 ms | 71 ms |
 
-Persisted writes plateau at about 3.9k/s: the database is the limit, and extra
-clients only add queueing.
+Stored writes plateau at about 3.9k/s. The database is the limit, and extra
+clients only add waiting. In these tables p50 is the typical request time and
+p99 is the time the slowest 1% of requests exceed.
 
-### Gate on and off
+### Does the gate help? Gate on and off
 
 `eval/fleet.ts` builds a repository with three independent problems per swarm
 (a bug in Node, Python or Go, a failing build, a formatter complaint, plus
-controls that are already green), runs `ledger swarm` with `qwen2.5:7b` on
-Ollama once with the gate and once without, and then runs each problem's own
-verify command on the integration branch. Six groups, three seeds, 36 swarms,
-54 tasks per arm. The full table is `eval/results/fleet.md`.
+control tasks that are already correct). It runs `ledger swarm` with
+`qwen2.5:7b` on Ollama once with the gate and once without, then runs each
+problem's own verify command on the integration branch. Six groups, three seeds,
+36 swarms, 54 tasks per setting. The full table is `eval/results/fleet.md`.
 
-| Tasks with a real bug (45 per arm) | Gate on | Gate off |
+| Tasks with a real bug (45 per setting) | Gate on | Gate off |
 |---|---|---|
 | Merged and verified | 12 (27%, 16%-41%) | 9 (20%, 11%-34%) |
 | Merged but verify still fails | 21 | 15 |
@@ -367,147 +460,22 @@ verify command on the integration branch. Six groups, three seeds, 36 swarms,
 | Attempts per task | 1.56 | 1.00 |
 | Wall time per swarm | 4.3 min | 2.2 min |
 
-The difference is small and the intervals overlap, so 54 tasks per arm do not
-show that the gate improves outcomes. What the data does show:
+The ranges overlap, so 54 tasks per setting do not show that the gate improves
+outcomes. What the data does show:
 
-- All of the gate's extra merges come from the no-change retry, none from
-  catching a false claim. Across both arms the attempt table has 32 retries and
-  14 failures, every one of them "no files were changed": the 7B workers often
-  exit without editing anything, and the gate sends those back once with a
-  hint instead of merging nothing. The checker flagged no turn in this run.
-- Blocked is zero in both arms. The gate can only stop what the checker can
-  see, and the failures here are code that does not build or does not fix the
-  bug, with no test-success claim to contradict. About two thirds of merged
-  bug tasks still fail their verify command in both arms.
+- All of the gate's extra merges came from the retry for "no files were
+  changed", none from catching a false claim. Across both settings there were
+  32 retries and 14 failures of that kind: the 7B workers often exit without
+  editing anything, and the gate sends them back once with a hint instead of
+  merging nothing. The checker flagged no turn in this run.
+- Nothing was blocked in either setting. The gate can only stop what the
+  checker can see, and the failures here were code that does not build or does
+  not fix the bug, with no test-success claim to contradict. About two thirds of
+  merged bug tasks still fail their verify command either way.
 - The gate costs about twice the wall time, because retries rerun the agent.
 
-The honest reading is that the gate is a cheap filter on false claims, not a
-substitute for running the project's own tests before a merge.
-
-## System design
-
-```
-                  ┌──────────────────────────────────────────────┐
-   CLI args  ───▶ │                  main()                       │
-   stdin     ───▶ │   parse args · load settings · build prompt   │
-                  └───────────────┬────────────────┬──────────────┘
-                                  │                │
-                        print mode│      interactive UI or REPL
-                                  ▼                ▼
-                  ┌────────────────────────────────────────────────┐
-                  │                 runAgent()                      │
-                  │  stream → check turn's claims → run tools →     │
-                  │  record evidence → append results → repeat      │
-                  └───────┬───────────────────────────┬────────────┘
-                          │ StreamEvent                │ tool call
-                          ▼                            ▼
-              ┌───────────────────────┐    ┌──────────────────────┐
-              │       Provider         │    │     Tool registry     │
-              │ claude gemini groq     │    │ Read Write Edit Bash  │
-              │ ollama                 │    │ Grep Find Ls Git*     │
-              └───────────────────────┘    └──────────┬────────────┘
-                                                       │ Bash Write Edit
-                                                       ▼
-                                             ┌──────────────────────┐
-                                             │     EvidenceLog       │
-                                             │  c1 c2 c3 ... + diff  │
-                                             └──────────┬────────────┘
-                                   turn text + evidence  ▼
-                                             ┌──────────────────────┐
-                                             │  grounding checker     │
-                                             │  Go, JSON lines over   │
-                                             │  stdin/stdout          │
-                                             └──────────┬────────────┘
-                                                        ▼
-                                          one verdict per claim, flags
-                                          rendered, false ones optionally
-                                          sent back and the revision rechecked
-```
-
-Two event streams hold the system together:
-
-- **`StreamEvent`**: what a provider yields: `text_delta`, `tool_use_start` /
-  `tool_use_input_delta` / `tool_use_end`, `message_end`.
-- **`AgentEvent`**: what the loop yields to a UI: `text_delta`, `tool_start` /
-  `tool_end`, `evidence`, `assistant_turn`, `grounding_check`,
-  `grounding_flag`, `grounding_revision_requested`,
-  `grounding_revision_result`, `turn_end`, `agent_end` (with the run's
-  `ledger`).
-
-A new provider never touches the agent loop, and a new UI never touches the
-providers or the grounding layer. The eval recorder is just another consumer
-of `AgentEvent`.
-
-### Why Go for the checker
-
-The agent loop and provider adapters spend almost all their time waiting on
-network streams, so TypeScript is the right tool there. The checker runs on
-every assistant turn, and it is the one part where a slow or wrong check
-defeats the point. One long-lived binary talking JSON lines keeps it fast,
-dependency-free, and testable on its own with `go test`.
-
-## Project layout
-
-```
-src/
-├── index.ts, main.ts           # bin entry and wiring
-├── agent/
-│   ├── loop.ts                 # the agent loop, grounding hook included
-│   └── compaction.ts           # summarise older turns near the context limit
-├── grounding/
-│   ├── evidence.ts             # EvidenceLog: refs, fresh tracking
-│   ├── client.ts               # talks to the checker binary
-│   ├── validation.ts           # validation modes, revision budget, the run's ledger
-│   ├── format.ts               # flag lines, feedback text, ledger summary
-│   └── types.ts                # wire types shared with the Go checker
-├── permissions/                # ask-before-change policy, bash prefix rules, terminal prompt
-├── providers/                  # claude, gemini, groq, ollama adapters, readable errors
-├── tools/                      # read write edit bash grep find ls, git tools, diff, workspace sandbox
-├── commands/                   # slash command registry and the built-in commands
-├── modes/                      # print and interactive, shared turn runner
-├── tui/                        # full-screen Ink UI
-│   ├── run.tsx, app.tsx        # entry, layout, keys, run and command wiring
-│   ├── state.ts                # pure reducer: agent events in, UI state out
-│   ├── markdown.ts, text.ts    # markdown to styled lines, wrapping, widths
-│   ├── verdicts.ts             # which sentence gets which verdict mark
-│   ├── layout.ts               # transcript, ledger table, panel and status lines
-│   ├── editor.ts, input.tsx    # multi-line input and command hints
-│   ├── permission.ts           # asker that queues prompts for the UI
-│   └── transcript.tsx, panel.tsx, permission-prompt.tsx, status-bar.tsx, lines.tsx
-├── session/                    # JSONL session store, resume, the active session
-├── swarm/                      # ledger swarm: planner, worktrees, workers, merge queue, client
-├── server/                     # recorder that streams a session's turns to ledgerd
-└── config/, cli/
-
-checker/                        # Go module, no third-party deps
-├── cmd/grounding-checker/      # JSON-line loop that the CLI spawns
-├── protocol.go                 # wire types
-├── claims.go                   # sentence split, hedges, negation, claim kinds, tags
-├── evidence.go                 # command families, helpers
-├── testsummary.go              # test runner summary parsers
-├── rules.go                    # attribution and dispatch
-├── rule_*.go                   # one file per rule
-└── *_test.go                   # one test file per rule, plus parsers and attribution
-
-server/                         # Go service: verification, swarm state machine, dashboard
-├── proto/ledger/v1/            # VerifyService and SwarmService
-├── cmd/ledgerd, cmd/loadgen    # the server and its load generator
-└── internal/                   # store, queue, breaker, verify, orch, events, telemetry, web
-
-deploy/                         # Dockerfile, compose stack, prometheus config
-
-eval/
-├── scenarios/                  # seeded fixture repos with ground truth
-├── run.ts                      # records sessions as JSONL traces
-├── label.ts                    # blind labeling CLI
-├── judge.ts                    # optional LLM judge baseline
-├── score.ts                    # offline replay, precision and recall
-├── import-openhands.ts, sample.ts, score-sampled.ts   # real traces at scale
-├── fleet.ts, score-fleet.ts    # gate on vs gate off experiment
-└── traces/, labels/, results/
-
-docs/design/                    # design docs
-```
+The gate is a cheap filter on false claims. It does not replace running the
+project's own tests before a merge.
 
 ## Getting started
 
@@ -797,6 +765,71 @@ Merge, rebase, push, stash and the rest still go through Bash.
 
 Every id above is in the model list of the matching provider SDK
 (`@anthropic-ai/sdk` 0.131, `@google/genai` 1.52, `groq-sdk` 1.6).
+
+## Project layout
+
+```
+src/
+├── index.ts, main.ts           # bin entry and wiring
+├── agent/
+│   ├── loop.ts                 # the agent loop, grounding hook included
+│   └── compaction.ts           # summarise older turns near the context limit
+├── grounding/
+│   ├── evidence.ts             # EvidenceLog: refs, fresh tracking
+│   ├── client.ts               # talks to the checker binary
+│   ├── validation.ts           # validation modes, revision budget, the run's ledger
+│   ├── format.ts               # flag lines, feedback text, ledger summary
+│   └── types.ts                # wire types shared with the Go checker
+├── permissions/                # ask-before-change policy, bash prefix rules, terminal prompt
+├── providers/                  # claude, gemini, groq, ollama adapters, readable errors
+├── tools/                      # read write edit bash grep find ls, git tools, diff, workspace sandbox
+├── commands/                   # slash command registry and the built-in commands
+├── modes/                      # print and interactive, shared turn runner
+├── tui/                        # full-screen Ink UI
+│   ├── run.tsx, app.tsx        # entry, layout, keys, run and command wiring
+│   ├── state.ts                # pure reducer: agent events in, UI state out
+│   ├── markdown.ts, text.ts    # markdown to styled lines, wrapping, widths
+│   ├── verdicts.ts             # which sentence gets which verdict mark
+│   ├── layout.ts               # transcript, ledger table, panel and status lines
+│   ├── editor.ts, input.tsx    # multi-line input and command hints
+│   ├── permission.ts           # asker that queues prompts for the UI
+│   └── transcript.tsx, panel.tsx, permission-prompt.tsx, status-bar.tsx, lines.tsx
+├── session/                    # JSONL session store, resume, the active session
+├── swarm/                      # ledger swarm: planner, worktrees, workers, merge queue, client
+├── server/                     # recorder that streams a session's turns to ledgerd
+└── config/, cli/
+
+checker/                        # Go module, no third-party deps
+├── cmd/grounding-checker/      # JSON-line loop that the CLI spawns
+├── protocol.go                 # wire types
+├── claims.go                   # sentence split, hedges, negation, claim kinds, tags
+├── evidence.go                 # command families, helpers
+├── testsummary.go              # test runner summary parsers
+├── rules.go                    # attribution and dispatch
+├── rule_*.go                   # one file per rule
+└── *_test.go                   # one test file per rule, plus parsers and attribution
+
+server/                         # Go service: verification, swarm state machine, dashboard
+├── proto/ledger/v1/            # VerifyService and SwarmService
+├── cmd/ledgerd, cmd/loadgen    # the server and its load generator
+└── internal/                   # store, queue, breaker, verify, orch, events, telemetry, web
+
+deploy/                         # Dockerfile, compose stack, prometheus config
+
+site/                           # project site and playground (React, Vite; the checker runs as WebAssembly)
+
+eval/
+├── scenarios/                  # seeded fixture repos with ground truth
+├── run.ts                      # records sessions as JSONL traces
+├── label.ts                    # blind labeling CLI
+├── judge.ts                    # optional LLM judge baseline
+├── score.ts                    # offline replay, precision and recall
+├── import-openhands.ts, sample.ts, score-sampled.ts   # real traces at scale
+├── fleet.ts, score-fleet.ts    # gate on vs gate off experiment
+└── traces/, labels/, results/
+
+docs/design/                    # design docs
+```
 
 ## Development
 

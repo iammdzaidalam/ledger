@@ -5,6 +5,8 @@
 	"type": "module",
 	"license": "MIT",
 	"author": "iammdzaidalam",
+	"homepage": "https://ledger-psi-umber-17.vercel.app",
+	"bugs": "https://github.com/iammdzaidalam/ledger/issues",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/iammdzaidalam/ledger.git"
