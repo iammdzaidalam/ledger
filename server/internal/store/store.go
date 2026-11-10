@@ -248,8 +248,10 @@ func GetRun(ctx context.Context, db DB, id string) (RunSummary, []TurnDetail, er
 	return run, turns, rows.Err()
 }
 
-func ListRuns(ctx context.Context, db DB, limit int, before time.Time) ([]RunSummary, error) {
-	rows, err := db.Query(ctx, `select `+summaryColumns+` from runs r where r.created_at < $1 order by r.created_at desc, r.id desc limit $2`, before, limit)
+func ListRuns(ctx context.Context, db DB, limit int, before time.Time, beforeID string) ([]RunSummary, error) {
+	rows, err := db.Query(ctx, `select `+summaryColumns+` from runs r
+		where r.created_at < $1 or (r.created_at = $1 and r.id < $3)
+		order by r.created_at desc, r.id desc limit $2`, before, limit, beforeID)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -169,5 +170,37 @@ func TestListRunsPages(t *testing.T) {
 	page2, err := client.ListRuns(ctx, connect.NewRequest(&ledgerv1.ListRunsRequest{Limit: 2, Before: page1.Msg.Next}))
 	if err != nil || len(page2.Msg.Runs) != 1 || page2.Msg.Runs[0].Id != "a" {
 		t.Fatalf("page 2: %+v %v", page2, err)
+	}
+}
+
+func TestListRunsPagesThroughEqualTimestamps(t *testing.T) {
+	client, svc := start(t)
+	ctx := context.Background()
+	ids := []string{"a", "b", "c", "d", "e"}
+	for _, id := range ids {
+		if _, err := client.RecordTurn(ctx, connect.NewRequest(&ledgerv1.RecordTurnRequest{RunId: id, Turn: 1, TurnText: "x"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.DB.Exec(ctx, `update runs set created_at = '2026-01-01T00:00:00Z'`); err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	cursor := ""
+	for i := 0; i < 10; i++ {
+		page, err := client.ListRuns(ctx, connect.NewRequest(&ledgerv1.ListRunsRequest{Limit: 2, Before: cursor}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range page.Msg.Runs {
+			seen = append(seen, r.Id)
+		}
+		if page.Msg.Next == "" {
+			break
+		}
+		cursor = page.Msg.Next
+	}
+	if got := strings.Join(seen, ""); got != "edcba" {
+		t.Fatalf("paged through %q, want every run once in order", got)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -207,15 +208,16 @@ func (s *Service) ListRuns(ctx context.Context, req *connect.Request[ledgerv1.Li
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	before := time.Now().Add(time.Hour)
+	before, beforeID := time.Now().Add(time.Hour), ""
 	if req.Msg.Before != "" {
-		t, err := time.Parse(time.RFC3339Nano, req.Msg.Before)
+		stamp, id, _ := strings.Cut(req.Msg.Before, "|")
+		t, err := time.Parse(time.RFC3339Nano, stamp)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("before: %w", err))
 		}
-		before = t
+		before, beforeID = t, id
 	}
-	runs, err := store.ListRuns(ctx, s.DB, limit, before)
+	runs, err := store.ListRuns(ctx, s.DB, limit, before, beforeID)
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +226,8 @@ func (s *Service) ListRuns(ctx context.Context, req *connect.Request[ledgerv1.Li
 		out.Runs = append(out.Runs, runToProto(r))
 	}
 	if len(runs) == limit {
-		out.Next = runs[len(runs)-1].CreatedAt.Format(time.RFC3339Nano)
+		last := runs[len(runs)-1]
+		out.Next = last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
 	}
 	return connect.NewResponse(out), nil
 }
